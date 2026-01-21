@@ -35,8 +35,19 @@
     }
 
     .container{max-width:1100px;margin:0 auto;padding:22px 18px}
+    .header .container{position:relative}
 
-    .brand{display:flex;gap:14px;align-items:center}
+    .brand{display:flex;gap:12px;align-items:flex-start}
+    .brand-logo{
+      position:absolute;
+      top:22px;
+      right:18px;
+      height:clamp(28px, 4vw, 42px);
+      width:auto;
+      max-width:clamp(100px, 14vw, 150px);
+      object-fit:contain;
+      z-index:1;
+    }
 
     h1{font-size:clamp(22px,3vw,34px);margin:0 0 6px;letter-spacing:-.2px}
     h2{margin:0 0 10px;letter-spacing:-.2px}
