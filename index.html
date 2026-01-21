@@ -243,11 +243,14 @@
 
           <div class="small" style="margin-bottom:10px"><strong>Important:</strong> you must click submit to see eligible measures.</div>
           <div class="flex">
-            <button class="btn" id="submit-new" type="button" aria-disabled="true" disabled>Submit and show eligible measures</button>
+            <button class="btn submit-btn status-ready" id="submit-new" type="button" aria-disabled="true" disabled>
+              <span class="btn-label">Submit and show eligible measures</span>
+              <span class="btn-spinner" aria-hidden="true"></span>
+            </button>
             <button class="btn secondary" id="reset-new" type="button">Reset</button>
             <span class="small" id="submit-status"></span>
           </div>
-          <div class="small" style="margin-top:8px">We will save your responses and eligible measures to our Google Sheet.</div>
+          <div class="small" style="margin-top:8px">We will save your responses and eligible measures to our Google Sheet to verify measure proposals.</div>
         </div>
 
         <!-- Eligible measures -->
@@ -290,15 +293,19 @@
         <div class="card" id="sec-x">
           <div class="section-title">Existing Trade 2025 farm</div>
           <h2>Enter your MRV criteria values</h2>
-          <div class="small">You do not need to enter any other data. Enter Criteria 1–7 from your MRV results, then continue to eligible measures. We will save these to our Google Sheet so we can cross-check them.</div>
+          <div class="small">You do not need to enter any other data. Enter Criteria 1-7 from your MRV results, then submit to see eligible measures. We will save these to our Google Sheet so we can cross-check them.</div>
 
           <div class="grid" style="margin-top:10px" id="criteria-existing"></div>
 
           <div class="flex" style="justify-content:space-between;margin-top:14px">
             <button class="btn secondary" id="reset-existing" type="button">Reset</button>
-            <button class="btn" id="submit-existing" type="button" aria-disabled="true" disabled>Continue to eligible measures</button>
+            <button class="btn submit-btn status-ready" id="submit-existing" type="button" aria-disabled="true" disabled>
+              <span class="btn-label">Submit and show eligible measures</span>
+              <span class="btn-spinner" aria-hidden="true"></span>
+            </button>
           </div>
           <div class="small status-msg" id="existing-status"></div>
+          <div class="small" style="margin-top:8px">We will save your responses and eligible measures to our Google Sheet to verify measure proposals.</div>
         </div>
 
         <div class="card locked" id="sec-out-existing">
@@ -314,7 +321,7 @@
           </div>
           <div class="notice" style="display:none">Make a note of the measures you are eligible for. Return to <strong>NatureBid</strong> and submit proposals for <strong>these measures only</strong>.</div>
           <div class="measures" id="measures-existing"></div>
-          <div class="small" id="measures-existing-hint">Enter your MRV criteria values and click continue to see eligible measures.</div>
+          <div class="small" id="measures-existing-hint">Enter your MRV criteria values and click submit to see eligible measures.</div>
 
           <div style="margin-top:14px">
             <details class="accordion hide" id="ineligible-acc-existing">

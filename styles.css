@@ -16,6 +16,12 @@
       --badge-advanced:#16ae69;
       --badge-leading:#5ab8b4;
 
+      --submit-ready:var(--forest);
+      --submit-loading:var(--badge-leading);
+      --submit-submitted:var(--leaf);
+      --submit-resubmit:var(--badge-engaged);
+      --submit-error:var(--alert);
+
       --radius:16px;
     }
 
@@ -134,6 +140,22 @@
 .btn:active{transform:translateY(1px)}
 .btn[aria-disabled="true"], .btn.disabled{opacity:.55;pointer-events:none}
 .btn:disabled{opacity:.55;cursor:not-allowed}
+
+.submit-btn .btn-spinner{
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  border:2px solid rgba(255,255,255,.35);
+  border-top-color:#fff;
+  animation:spin 1s linear infinite;
+  display:none;
+}
+.submit-btn.status-loading .btn-spinner{display:inline-block}
+.submit-btn.status-ready{background:var(--submit-ready)}
+.submit-btn.status-loading{background:var(--submit-loading)}
+.submit-btn.status-submitted{background:var(--submit-submitted)}
+.submit-btn.status-resubmit{background:var(--submit-resubmit)}
+.submit-btn.status-error{background:var(--submit-error)}
 
     .badge{display:inline-flex;gap:8px;align-items:center;padding:5px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:12px}
     .badge .dot{width:8px;height:8px;border-radius:50%}

@@ -94,6 +94,8 @@ const app = {
   configLoadError: null,
   flow: null, // 'new' | 'trade2025'
   submitted: false,
+  submitState: { new:'ready', trade2025:'ready' },
+  submitDirty: { new:false, trade2025:false },
   done: new Set(),
   warn: new Set(),
   data: {
@@ -114,6 +116,51 @@ const app = {
     mrvCriteria: {} // C1..C7 for existing farms
   }
 };
+
+const SUBMIT_LABELS = {
+  ready: 'Submit and show eligible measures',
+  loading: 'Submitting...',
+  submitted: 'Submitted ✓',
+  resubmit: 'Resubmit',
+  error: 'Try again'
+};
+
+function submitKey_(flow){
+  return flow === 'new' ? 'new' : 'trade2025';
+}
+
+function setSubmitState_(flow, state){
+  const key = submitKey_(flow);
+  app.submitState[key] = state;
+  const btnId = flow === 'new' ? 'submit-new' : 'submit-existing';
+  const btn = document.getElementById(btnId);
+  if(!btn) return;
+  const label = btn.querySelector('.btn-label');
+  if(label) label.textContent = SUBMIT_LABELS[state] || SUBMIT_LABELS.ready;
+  btn.classList.remove('status-ready','status-loading','status-submitted','status-resubmit','status-error');
+  btn.classList.add(`status-${state}`);
+}
+
+function syncSubmitState_(flow){
+  const key = submitKey_(flow);
+  if(app.submitState[key] === 'loading') return;
+  const state = app.submitted ? (app.submitDirty[key] ? 'resubmit' : 'submitted') : 'ready';
+  setSubmitState_(flow, state);
+}
+
+function markSubmitDirty_(flow){
+  const key = submitKey_(flow);
+  if(app.flow !== flow || !app.submitted || app.submitDirty[key]) return;
+  app.submitDirty[key] = true;
+  setSubmitState_(flow, 'resubmit');
+}
+
+function resetSubmitState_(){
+  app.submitState = { new:'ready', trade2025:'ready' };
+  app.submitDirty = { new:false, trade2025:false };
+  setSubmitState_('new', 'ready');
+  setSubmitState_('trade2025', 'ready');
+}
 
 // ===============================
 // Missing highlight helpers
@@ -1060,6 +1107,7 @@ function bindRotations(){
   BOUND.rot = true;
 
   addBtn.onclick = ()=>{
+    markSubmitDirty_('new');
     tbody.insertAdjacentHTML('beforeend', rotRowTemplate(uid('rot')));
     recalc();
   };
@@ -1067,11 +1115,15 @@ function bindRotations(){
   tbody.addEventListener('click', (e)=>{
     const btn = e.target.closest('[data-act="del"]');
     if(!btn) return;
+    markSubmitDirty_('new');
     btn.closest('tr')?.remove();
     recalc();
   });
 
-  tbody.addEventListener('input', ()=> recalc());
+  tbody.addEventListener('input', ()=>{
+    markSubmitDirty_('new');
+    recalc();
+  });
 
   recalc();
 }
@@ -1148,6 +1200,7 @@ function bindInfrastructure(){
   BOUND.infra = true;
 
   addBtn.onclick = ()=>{
+    markSubmitDirty_('new');
     tbody.insertAdjacentHTML('beforeend', infraRowTemplate(uid('infra')));
     recalc();
   };
@@ -1155,12 +1208,19 @@ function bindInfrastructure(){
   tbody.addEventListener('click', (e)=>{
     const btn = e.target.closest('[data-act="del"]');
     if(!btn) return;
+    markSubmitDirty_('new');
     btn.closest('tr')?.remove();
     recalc();
   });
 
-  tbody.addEventListener('input', ()=> recalc());
-  tbody.addEventListener('change', ()=> recalc());
+  tbody.addEventListener('input', ()=>{
+    markSubmitDirty_('new');
+    recalc();
+  });
+  tbody.addEventListener('change', ()=>{
+    markSubmitDirty_('new');
+    recalc();
+  });
 
   recalc();
 }
@@ -1222,6 +1282,7 @@ function bindCrops(){
   BOUND.crops = true;
 
   addBtn.onclick = ()=>{
+    markSubmitDirty_('new');
     tbody.insertAdjacentHTML('beforeend', cropRowTemplate(uid('crop')));
     recalc();
   };
@@ -1229,12 +1290,19 @@ function bindCrops(){
   tbody.addEventListener('click', (e)=>{
     const btn = e.target.closest('[data-act="del"]');
     if(!btn) return;
+    markSubmitDirty_('new');
     btn.closest('tr')?.remove();
     recalc();
   });
 
-  tbody.addEventListener('input', ()=> recalc());
-  tbody.addEventListener('change', ()=> recalc());
+  tbody.addEventListener('input', ()=>{
+    markSubmitDirty_('new');
+    recalc();
+  });
+  tbody.addEventListener('change', ()=>{
+    markSubmitDirty_('new');
+    recalc();
+  });
 
   recalc();
 }
@@ -1274,6 +1342,7 @@ function bindCriteriaNew(){
     el?.addEventListener('input', ()=>{
       const v = Number(el.value);
       app.data.criteria_inputs[key] = el.value.trim()==='' ? null : clampPct(v);
+      markSubmitDirty_('new');
       validateCriteriaSection(false);
       updateReview();
     });
@@ -1286,6 +1355,7 @@ function bindCriteriaNew(){
       if(cid===6) app.data.criteria_inputs.c6 = !!el.checked;
       const v = el.checked ? 1 : 0;
       setBadge('new', cid, levelFor(v, CRITERIA.find(x=>x.id===cid).thresholds));
+      markSubmitDirty_('new');
       validateCriteriaSection(false);
       updateReview();
     });
@@ -1314,6 +1384,7 @@ function bindCriteriaExisting(){
         const v = el.checked ? 1 : 0;
         app.data.mrvCriteria['C'+c.id] = v;
         setBadge('existing', c.id, levelFor(v, c.thresholds));
+        markSubmitDirty_('trade2025');
         validateExisting(false);
       });
     } else {
@@ -1322,6 +1393,7 @@ function bindCriteriaExisting(){
         const v = raw==='' ? null : clampPct(Number(raw));
         app.data.mrvCriteria['C'+c.id] = v;
         setBadge('existing', c.id, v==null ? null : levelFor(v, c.thresholds));
+        markSubmitDirty_('trade2025');
         validateExisting(false);
       });
     }
@@ -1394,6 +1466,7 @@ function validateExisting(showMissing){
   const ok = missing.length === 0;
   btn.classList.toggle('disabled', !ok);
   setAriaDisabled_(btn, !ok);
+  if(ok && app.submitState.trade2025 !== 'loading') syncSubmitState_('trade2025');
 
   const status = document.getElementById('existing-status');
   if(status){
@@ -1473,6 +1546,7 @@ function bindSection1(){
     app.data.applicant = { name: v.name, business: v.business, email: v.email, type: v.type };
     app.flow = (v.type === 'new') ? 'new' : 'trade2025';
     app.submitted = false;
+    resetSubmitState_();
 
     markDone('s1');
 
@@ -1549,8 +1623,14 @@ function bindBaseline(){
   }
 
   ids.forEach(id=>{
-    document.getElementById(id)?.addEventListener('input', ()=> sync(false));
-    document.getElementById(id)?.addEventListener('change', ()=> sync(false));
+    document.getElementById(id)?.addEventListener('input', ()=>{
+      markSubmitDirty_('new');
+      sync(false);
+    });
+    document.getElementById(id)?.addEventListener('change', ()=>{
+      markSubmitDirty_('new');
+      sync(false);
+    });
   });
 
   next?.addEventListener('click', ()=>{
@@ -1698,6 +1778,7 @@ function updateSubmitNewState(){
 
   const btn = document.getElementById('submit-new');
   if(!btn) return;
+  if(app.submitState.new === 'loading') return;
 
   const c = computeCriteriaForNew();
   const required = [1,2,3,4,7];
@@ -1706,6 +1787,7 @@ function updateSubmitNewState(){
   const ok = missing.length === 0 && (app.data.crops.length > 0) && (app.data.rotations.length > 0);
   btn.classList.toggle('disabled', !ok);
   setAriaDisabled_(btn, !ok);
+  if(ok) syncSubmitState_('new');
 }
 
 // ===============================
@@ -2027,6 +2109,14 @@ function bindExistingSubmit(){
       return;
     }
 
+    setSubmitState_('trade2025', 'loading');
+    btn.classList.add('disabled');
+    setAriaDisabled_(btn, true);
+    if(status){
+      status.textContent = '';
+      status.classList.remove('err');
+    }
+
     // Default C5/C6 if not provided
     for(let i=5;i<=6;i++){
       const k = 'C'+i;
@@ -2036,6 +2126,9 @@ function bindExistingSubmit(){
     // Always try to ensure measures are loaded so we can show eligible + ineligible lists
     const okMeasures = await ensureMeasuresLoaded_();
     if(!okMeasures){
+      setSubmitState_('trade2025', app.submitDirty.trade2025 ? 'resubmit' : 'ready');
+      btn.classList.remove('disabled');
+      setAriaDisabled_(btn, false);
       out.innerHTML = `<div class="error"><strong>Measures could not be loaded</strong><div class="small" style="margin-top:6px">Please refresh the page and try again.</div></div>`;
       return;
     }
@@ -2043,13 +2136,18 @@ function bindExistingSubmit(){
     const criteria = computeCriteriaForExisting();
     const selection = selectEligibleMeasures(criteria);
 
-    status.textContent = 'Submitting…';
-    status.classList.remove('err');
-
     try{
       const payload = buildSubmissionPayload('trade2025', criteria, selection);
       await postSubmission(payload);
-      status.textContent = 'Submitted ✓';
+
+      setSubmitState_('trade2025', 'submitted');
+      app.submitDirty.trade2025 = false;
+      btn.classList.remove('disabled');
+      setAriaDisabled_(btn, false);
+      if(status){
+        status.textContent = '';
+        status.classList.remove('err');
+      }
 
       // Enable print for existing farms
       document.getElementById('print-existing')?.classList.remove('hide');
@@ -2073,8 +2171,14 @@ function bindExistingSubmit(){
 
     } catch (e) {
       console.error(e);
-      status.textContent = 'Submission failed — please try again.';
-      status.classList.add('err');
+      app.submitDirty.trade2025 = true;
+      setSubmitState_('trade2025', 'resubmit');
+      btn.classList.remove('disabled');
+      setAriaDisabled_(btn, false);
+      if(status){
+        status.textContent = 'Submission failed - please try again.';
+        status.classList.add('err');
+      }
     }
   });
 }
@@ -2101,9 +2205,20 @@ function bindNewSubmit(){
       return;
     }
 
+    setSubmitState_('new', 'loading');
+    btn.classList.add('disabled');
+    setAriaDisabled_(btn, true);
+    if(status){
+      status.textContent = '';
+      status.classList.remove('err');
+    }
+
     // Always ensure measures loaded so we can show eligible + ineligible lists
     const okMeasures = await ensureMeasuresLoaded_();
     if(!okMeasures){
+      setSubmitState_('new', app.submitDirty.new ? 'resubmit' : 'ready');
+      btn.classList.remove('disabled');
+      setAriaDisabled_(btn, false);
       out.innerHTML = `<div class="error"><div class="loading"><span class="spinner"></span><strong>Measures could not be loaded</strong></div><div class="small" style="margin-top:6px">Please refresh the page and try again.</div></div>`;
       return;
     }
@@ -2111,13 +2226,18 @@ function bindNewSubmit(){
     const criteria = computeCriteriaForNew();
     const selection = selectEligibleMeasures(criteria);
 
-    status.textContent = 'Submitting…';
-
     try{
       const payload = buildSubmissionPayload('new', criteria, selection);
       await postSubmission(payload);
 
-      status.textContent = 'Submitted ✓';
+      setSubmitState_('new', 'submitted');
+      app.submitDirty.new = false;
+      btn.classList.remove('disabled');
+      setAriaDisabled_(btn, false);
+      if(status){
+        status.textContent = '';
+        status.classList.remove('err');
+      }
       app.submitted = true;
       markAllDoneForFlow_();
       setLocked('sec-out-new', false);
@@ -2140,7 +2260,14 @@ function bindNewSubmit(){
 
     } catch (e) {
       console.error(e);
-      status.textContent = 'Submission failed — please try again.';
+      app.submitDirty.new = true;
+      setSubmitState_('new', 'resubmit');
+      btn.classList.remove('disabled');
+      setAriaDisabled_(btn, false);
+      if(status){
+        status.textContent = 'Submission failed - please try again.';
+        status.classList.add('err');
+      }
     }
   });
 }
@@ -2177,6 +2304,7 @@ function resetAll(){
 
   app.flow = null;
   app.submitted = false;
+  resetSubmitState_();
   app.done = new Set();
   app.warn = new Set();
   app.data.applicant = { name:'', business:'', email:'', type:'' };
@@ -2198,7 +2326,7 @@ function resetAll(){
   document.getElementById('print-existing')?.classList.add('hide');
 
   if(document.getElementById('measures-new-hint')) document.getElementById('measures-new-hint').textContent='Submit responses to see eligible measures.';
-  if(document.getElementById('measures-existing-hint')) document.getElementById('measures-existing-hint').textContent='Enter your MRV criteria values and click continue to see eligible measures.';
+  if(document.getElementById('measures-existing-hint')) document.getElementById('measures-existing-hint').textContent='Enter your MRV criteria values and click submit to see eligible measures.';
 
   ['s1-status','s2-status','s3-status','s4-status','s5-status','s6-status','submit-status','existing-status'].forEach(id=>{
     const el = document.getElementById(id); if(el){ el.textContent=''; el.classList.remove('err','warn'); }
@@ -2243,6 +2371,7 @@ function readDomAutosaveState_(){
   const state = {
     flow: app.flow,
     submitted: !!app.submitted,
+    submitDirty: app.submitDirty,
     done: Array.from(app.done || []),
     applicant: {
       name: document.getElementById('s1-applicant')?.value?.trim() || '',
@@ -2421,6 +2550,7 @@ function restoreAutosaveToDom_(state){
   app.data.criteria_inputs = state.criteria_inputs || app.data.criteria_inputs;
   app.data.mrvCriteria = state.mrvCriteria || app.data.mrvCriteria;
   app.submitted = !!state.submitted;
+  app.submitDirty = state.submitDirty || { new:false, trade2025:false };
   app.done = new Set(Array.isArray(state.done) ? state.done : []);
 
   return true;
@@ -2457,6 +2587,9 @@ function bindResets(){
   document.getElementById('reset-existing')?.addEventListener('click', ()=>{
     clearMissingWithin(document.getElementById('existing-flow'));
     app.data.mrvCriteria = {};
+    app.submitted = false;
+    app.submitDirty.trade2025 = false;
+    setSubmitState_('trade2025', 'ready');
     for(const c of CRITERIA){
       const el = document.getElementById(`crit-existing-${c.id}`);
       if(!el) continue;
@@ -2466,7 +2599,7 @@ function bindResets(){
     }
     validateExisting(false);
     document.getElementById('measures-existing').innerHTML='';
-    document.getElementById('measures-existing-hint').textContent = 'Enter your MRV criteria values and click continue to see eligible measures.';
+    document.getElementById('measures-existing-hint').textContent = 'Enter your MRV criteria values and click submit to see eligible measures.';
     document.getElementById('ineligible-acc-existing')?.classList.add('hide');
   });
 }
@@ -2529,6 +2662,9 @@ async function main(){
 
   // Apply restored criteria values after the cards exist
   applyRestoredCriteriaToDom_();
+  if(app.flow === 'new') syncSubmitState_('new');
+  else if(app.flow === 'trade2025') syncSubmitState_('trade2025');
+  else resetSubmitState_();
 
   bindResets();
   bindPrintButton_();
