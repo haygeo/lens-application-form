@@ -75,6 +75,31 @@ const CROP_OPTIONS = [
   'Other field crops'
 ];
 
+const REGION_OPTIONS = [
+  { value:'east_of_england', label:'East of England', aggregators:['cefetra','chilton','frontier','openfield'] },
+  { value:'yorkshire', label:'Yorkshire', aggregators:['frontier','openfield'] }
+];
+
+const AGGREGATOR_LABELS = {
+  cefetra: 'Cefetra',
+  chilton: 'Chilton',
+  frontier: 'Frontier',
+  openfield: 'Openfield'
+};
+
+const AGGREGATOR_COLUMN_MAP = {
+  east_of_england: {
+    frontier: 'frontier_eoe',
+    openfield: 'openfield_eoe',
+    cefetra: 'cefetra',
+    chilton: 'chilton'
+  },
+  yorkshire: {
+    frontier: 'frontier_yks',
+    openfield: 'openfield_yks'
+  }
+};
+
 function stablePick(list, seed){
   let h = 0;
   for(let i=0;i<seed.length;i++) h = (h*31 + seed.charCodeAt(i)) >>> 0;
@@ -99,7 +124,7 @@ const app = {
   done: new Set(),
   warn: new Set(),
   data: {
-    applicant: { name:'', business:'', email:'', type:'' },
+    applicant: { name:'', business:'', email:'', type:'', region:'', supply_aggregator:'' },
     baseline: {
       agricultural_ha:null,
       arable_ha:null,
@@ -215,6 +240,43 @@ function normalizeGroup_(g){
   return s;
 }
 
+function regionLabel_(v){
+  return REGION_OPTIONS.find(r=> r.value === v)?.label || v || '';
+}
+
+function aggregatorLabel_(v){
+  return AGGREGATOR_LABELS[v] || v || '';
+}
+
+function aggregatorsForRegion_(regionValue){
+  return REGION_OPTIONS.find(r=> r.value === regionValue)?.aggregators || [];
+}
+
+function aggregatorColumnForSelection_(regionValue, aggregatorValue){
+  if(!regionValue || !aggregatorValue) return null;
+  const map = AGGREGATOR_COLUMN_MAP[regionValue];
+  return map ? (map[aggregatorValue] || null) : null;
+}
+
+function setAggregatorOptions_(regionValue){
+  const aggEl = document.getElementById('s1-aggregator');
+  if(!aggEl) return;
+
+  const prev = aggEl.value;
+  const options = aggregatorsForRegion_(regionValue);
+  const placeholder = regionValue ? 'Select…' : 'Select region first…';
+
+  aggEl.innerHTML = `<option value="" selected disabled>${placeholder}</option>` +
+    options.map(opt=> `<option value="${opt}">${escapeHtml(aggregatorLabel_(opt))}</option>`).join('');
+  aggEl.disabled = !regionValue;
+
+  if(prev && options.includes(prev)){
+    aggEl.value = prev;
+  } else {
+    aggEl.value = '';
+  }
+}
+
 function cfgFromSheetMeasures(sheetMeasures){
   const cfg = {};
   const meta = {};
@@ -232,11 +294,21 @@ function cfgFromSheetMeasures(sheetMeasures){
     const rawGroup = (m.measure_group || m.group || stablePick(MEASURE_GROUPS, code));
     const rawCat = (m.measure_category || m.category || stablePick(MEASURE_CATEGORIES, code+'cat'));
 
+    const aggregatorFlags = {
+      frontier_eoe: isBoolTrue(m.frontier_eoe),
+      cefetra: isBoolTrue(m.cefetra),
+      openfield_eoe: isBoolTrue(m.openfield_eoe),
+      chilton: isBoolTrue(m.chilton),
+      openfield_yks: isBoolTrue(m.openfield_yks),
+      frontier_yks: isBoolTrue(m.frontier_yks)
+    };
+
     cfg[code] = {
       active: isBoolTrue(m.active),
       group: normalizeGroup_(rawGroup),
       category: String(rawCat ?? '').trim(),
-      criteria
+      criteria,
+      aggregatorFlags
     };
   }
 
@@ -330,7 +402,8 @@ function allActiveMeasuresForLists_(){
       group: c.group,
       category: c.category,
       contributes_to: Array.from({length:7},(_,i)=>i+1).filter(i=> !!(c.criteria && c.criteria[i])),
-      criteriaFlags: c.criteria || {}
+      criteriaFlags: c.criteria || {},
+      aggregatorFlags: c.aggregatorFlags || {}
     });
   }
   out.sort((a,b)=> a.code.localeCompare(b.code));
@@ -340,6 +413,13 @@ function allActiveMeasuresForLists_(){
 function effectiveMeasures(){
   // For eligibility calculations, we only include measures that contribute to at least one criterion.
   return allActiveMeasuresForLists_().filter(m => (m.contributes_to || []).length > 0);
+}
+
+function measuresForEligibility_(){
+  const all = effectiveMeasures();
+  const column = aggregatorColumnForSelection_(app.data.applicant.region, app.data.applicant.supply_aggregator);
+  if(!column) return [];
+  return all.filter(m => isBoolTrue(m.aggregatorFlags?.[column]));
 }
 
 // ===============================
@@ -957,13 +1037,13 @@ function selectEligibleMeasures(criteriaValues){
   if(overall === 'advanced' || overall === 'leading'){
     eligible = [renderResiliencePayment()];
   } else {
-    const all = effectiveMeasures();
+    const all = measuresForEligibility_();
     eligible = suggestedMeasures(all, levels);
   }
 
   // Ineligible measures = all active measures not in eligible
   const eligibleCodes = new Set(eligible.map(m=>m.code));
-  const allActive = effectiveMeasures();
+  const allActive = measuresForEligibility_();
   const ineligible = allActive.filter(m=> !eligibleCodes.has(m.code));
 
   return { overall, levels, measures: eligible, ineligible };
@@ -1489,17 +1569,23 @@ function validateSection1(showMissing){
   const businessEl = document.getElementById('s1-business');
   const emailEl = document.getElementById('s1-email');
   const typeEl = document.getElementById('s1-type');
+  const regionEl = document.getElementById('s1-region');
+  const aggregatorEl = document.getElementById('s1-aggregator');
 
   const name = nameEl.value.trim();
   const business = businessEl.value.trim();
   const email = emailEl.value.trim();
   const type = typeEl.value;
+  const region = regionEl.value;
+  const supply_aggregator = aggregatorEl.value;
 
   const missing = [];
   if(!name) missing.push('Applicant name');
   if(!business) missing.push('Farm business name');
   if(!email || !email.includes('@')) missing.push('Email address');
   if(!type) missing.push('Farm type');
+  if(!region) missing.push('Region');
+  if(!supply_aggregator) missing.push('Supply aggregator');
 
   const ok = missing.length === 0;
 
@@ -1512,8 +1598,10 @@ function validateSection1(showMissing){
     setMissing(businessEl, !business);
     setMissing(emailEl, !email || !email.includes('@'));
     setMissing(typeEl, !type);
+    setMissing(regionEl, !region);
+    setMissing(aggregatorEl, !supply_aggregator);
   } else {
-    [nameEl,businessEl,emailEl,typeEl].forEach(el=> setMissing(el,false));
+    [nameEl,businessEl,emailEl,typeEl,regionEl,aggregatorEl].forEach(el=> setMissing(el,false));
   }
 
   const status = document.getElementById('s1-status');
@@ -1528,22 +1616,70 @@ function validateSection1(showMissing){
     }
   }
 
-  return { ok, name, business, email, type };
+  if(app.data && app.data.applicant){
+    app.data.applicant = { ...app.data.applicant, name, business, email, type, region, supply_aggregator };
+  }
+
+  return { ok, name, business, email, type, region, supply_aggregator };
 }
 
 function bindSection1(){
+  function markSection1Dirty_(){
+    if(app.flow === 'new') markSubmitDirty_('new');
+    if(app.flow === 'trade2025') markSubmitDirty_('trade2025');
+  }
+
   ['s1-applicant','s1-business','s1-email','s1-type'].forEach(id=>{
-    document.getElementById(id)?.addEventListener('input', ()=> validateSection1(false));
-    document.getElementById(id)?.addEventListener('change', ()=> validateSection1(false));
+    document.getElementById(id)?.addEventListener('input', ()=>{
+      validateSection1(false);
+      updateReview();
+      markSection1Dirty_();
+    });
+    document.getElementById(id)?.addEventListener('change', ()=>{
+      validateSection1(false);
+      updateReview();
+      markSection1Dirty_();
+    });
   });
 
   document.getElementById('s1-reset')?.addEventListener('click', ()=> resetAll());
+
+  const regionEl = document.getElementById('s1-region');
+  const aggregatorEl = document.getElementById('s1-aggregator');
+
+  regionEl?.addEventListener('change', ()=>{
+    const prev = aggregatorEl?.value || '';
+    setAggregatorOptions_(regionEl.value);
+    const next = aggregatorEl?.value || '';
+    if(prev && prev !== next){
+      validateSection1(true);
+    } else {
+      validateSection1(false);
+    }
+    updateReview();
+    markSection1Dirty_();
+  });
+
+  aggregatorEl?.addEventListener('change', ()=>{
+    validateSection1(false);
+    updateReview();
+    markSection1Dirty_();
+  });
+
+  setAggregatorOptions_(regionEl?.value || '');
 
   document.getElementById('s1-continue')?.addEventListener('click', ()=>{
     const v = validateSection1(true);
     if(!v.ok) return;
 
-    app.data.applicant = { name: v.name, business: v.business, email: v.email, type: v.type };
+    app.data.applicant = {
+      name: v.name,
+      business: v.business,
+      email: v.email,
+      type: v.type,
+      region: v.region,
+      supply_aggregator: v.supply_aggregator
+    };
     app.flow = (v.type === 'new') ? 'new' : 'trade2025';
     app.submitted = false;
     resetSubmitState_();
@@ -1744,11 +1880,12 @@ function updateReview(){
 
   el.innerHTML = `
     <div class="grid">
-      <div class="card" style="box-shadow:none">
-        <div class="section-title">Applicant</div>
-        <div><strong>${escapeHtml(app.data.applicant.name)}</strong></div>
-        <div class="small">${escapeHtml(app.data.applicant.business)} • ${escapeHtml(app.data.applicant.email)}</div>
-      </div>
+        <div class="card" style="box-shadow:none">
+          <div class="section-title">Applicant</div>
+          <div><strong>${escapeHtml(app.data.applicant.name)}</strong></div>
+          <div class="small">${escapeHtml(app.data.applicant.business)} • ${escapeHtml(app.data.applicant.email)}</div>
+          <div class="small">${escapeHtml(regionLabel_(app.data.applicant.region))} • ${escapeHtml(aggregatorLabel_(app.data.applicant.supply_aggregator))}</div>
+        </div>
       <div class="card" style="box-shadow:none">
         <div class="section-title">Baseline</div>
         <div class="small">Agricultural area: <strong>${b.agricultural_ha ?? '—'}</strong> ha</div>
@@ -1810,6 +1947,8 @@ function buildSubmissionPayload(flow, criteriaValues, selection){
 
   return {
     timestamp: new Date().toISOString(),
+    region: app.data.applicant.region || null,
+    supply_aggregator: app.data.applicant.supply_aggregator || null,
     farmer: {
       business_name: app.data.applicant.business,
       name: app.data.applicant.name,
@@ -1923,10 +2062,12 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Applicant &amp; Farm</h3>
-      <div><strong>Applicant:</strong> ${escapeHtml(a.name)}</div>
-      <div><strong>Farm business:</strong> ${escapeHtml(a.business)}</div>
-      <div><strong>Email:</strong> ${escapeHtml(a.email)}</div>
+        <h3 style="margin:0 0 8px">Applicant &amp; Farm</h3>
+        <div><strong>Applicant:</strong> ${escapeHtml(a.name)}</div>
+        <div><strong>Farm business:</strong> ${escapeHtml(a.business)}</div>
+        <div><strong>Email:</strong> ${escapeHtml(a.email)}</div>
+        <div><strong>Region:</strong> ${escapeHtml(regionLabel_(a.region))}</div>
+        <div><strong>Supply aggregator:</strong> ${escapeHtml(aggregatorLabel_(a.supply_aggregator))}</div>
 
       <div class="divider"></div>
 
@@ -2047,11 +2188,13 @@ function printExistingFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Applicant &amp; Farm</h3>
-      <div><strong>Applicant:</strong> ${escapeHtml(a.name)}</div>
-      <div><strong>Farm business:</strong> ${escapeHtml(a.business)}</div>
-      <div><strong>Email:</strong> ${escapeHtml(a.email)}</div>
-      <div class="small" style="margin-top:6px">Farm type: <strong>Existing Trade 2025 farm</strong></div>
+        <h3 style="margin:0 0 8px">Applicant &amp; Farm</h3>
+        <div><strong>Applicant:</strong> ${escapeHtml(a.name)}</div>
+        <div><strong>Farm business:</strong> ${escapeHtml(a.business)}</div>
+        <div><strong>Email:</strong> ${escapeHtml(a.email)}</div>
+        <div><strong>Region:</strong> ${escapeHtml(regionLabel_(a.region))}</div>
+        <div><strong>Supply aggregator:</strong> ${escapeHtml(aggregatorLabel_(a.supply_aggregator))}</div>
+        <div class="small" style="margin-top:6px">Farm type: <strong>Existing Trade 2025 farm</strong></div>
 
       <div class="divider"></div>
 
@@ -2284,12 +2427,13 @@ function resetAll(){
   clearAutosave_();
   try{ localStorage.removeItem(LS_VIEW_KEY); } catch {}
 
-  ['s1-applicant','s1-business','s1-email','s1-type'].forEach(id=>{
+  ['s1-applicant','s1-business','s1-email','s1-type','s1-region','s1-aggregator'].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
     if(el.tagName === 'SELECT') el.value = '';
     else el.value = '';
   });
+  setAggregatorOptions_('');
 
   ['s2-agri','s2-arable','s2-perm-crop','s2-pasture','s2-habitat','s2-livestock','s2-fuel'].forEach(id=>{
     const el = document.getElementById(id); if(el) el.value='';
@@ -2307,7 +2451,7 @@ function resetAll(){
   resetSubmitState_();
   app.done = new Set();
   app.warn = new Set();
-  app.data.applicant = { name:'', business:'', email:'', type:'' };
+  app.data.applicant = { name:'', business:'', email:'', type:'', region:'', supply_aggregator:'' };
   app.data.baseline = { agricultural_ha:null, arable_ha:null, perm_cropland_ha:null, perm_pasture_ha:null, habitat_ha:null, livestock:null, fuel_lpy:null };
   app.data.rotations = [];
   app.data.infrastructure = [];
@@ -2373,12 +2517,14 @@ function readDomAutosaveState_(){
     submitted: !!app.submitted,
     submitDirty: app.submitDirty,
     done: Array.from(app.done || []),
-    applicant: {
-      name: document.getElementById('s1-applicant')?.value?.trim() || '',
-      business: document.getElementById('s1-business')?.value?.trim() || '',
-      email: document.getElementById('s1-email')?.value?.trim() || '',
-      type: document.getElementById('s1-type')?.value || ''
-    },
+      applicant: {
+        name: document.getElementById('s1-applicant')?.value?.trim() || '',
+        business: document.getElementById('s1-business')?.value?.trim() || '',
+        email: document.getElementById('s1-email')?.value?.trim() || '',
+        type: document.getElementById('s1-type')?.value || '',
+        region: document.getElementById('s1-region')?.value || '',
+        supply_aggregator: document.getElementById('s1-aggregator')?.value || ''
+      },
     baseline: {
       agricultural_ha: numVal('s2-agri'),
       arable_ha: numVal('s2-arable'),
@@ -2466,6 +2612,9 @@ function restoreAutosaveToDom_(state){
     if(document.getElementById('s1-business')) document.getElementById('s1-business').value = a.business || '';
     if(document.getElementById('s1-email')) document.getElementById('s1-email').value = a.email || '';
     if(document.getElementById('s1-type')) document.getElementById('s1-type').value = a.type || '';
+    if(document.getElementById('s1-region')) document.getElementById('s1-region').value = a.region || '';
+    setAggregatorOptions_(a.region || '');
+    if(document.getElementById('s1-aggregator')) document.getElementById('s1-aggregator').value = a.supply_aggregator || '';
 
     // set app flow from restored type
     if(a.type === 'new') app.flow = 'new';
@@ -2604,15 +2753,17 @@ function bindResets(){
   });
 }
 
-function runTests(){
-  try{
-    console.assert(typeof LS_VIEW_KEY === 'string' && LS_VIEW_KEY.length > 0, 'LS_VIEW_KEY defined');
-    console.assert(document.getElementById('sec-1'), 'Section 1 exists');
-    console.assert(document.getElementById('s1-continue'), 'Section 1 continue exists');
-    console.assert(Array.isArray(INFRA_LOOKUP) && INFRA_LOOKUP.length === 10, 'Infra lookup has 10 items');
-    console.assert(CRITERIA.length === 7, '7 criteria');
-    console.assert(typeof bindInfrastructure === 'function' && typeof bindCrops === 'function', 'Bindings exist');
-    console.log('All tests passed');
+  function runTests(){
+    try{
+      console.assert(typeof LS_VIEW_KEY === 'string' && LS_VIEW_KEY.length > 0, 'LS_VIEW_KEY defined');
+      console.assert(document.getElementById('sec-1'), 'Section 1 exists');
+      console.assert(document.getElementById('s1-continue'), 'Section 1 continue exists');
+      console.assert(document.getElementById('s1-region'), 'Section 1 region exists');
+      console.assert(document.getElementById('s1-aggregator'), 'Section 1 aggregator exists');
+      console.assert(Array.isArray(INFRA_LOOKUP) && INFRA_LOOKUP.length === 10, 'Infra lookup has 10 items');
+      console.assert(CRITERIA.length === 7, '7 criteria');
+      console.assert(typeof bindInfrastructure === 'function' && typeof bindCrops === 'function', 'Bindings exist');
+      console.log('All tests passed');
   } catch(e){
     console.warn('Tests failed:', e);
   }
