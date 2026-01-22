@@ -2622,9 +2622,13 @@ async function main(){
   setStepper('s1');
 
   // Try to apply cached measures immediately (fast UI)
+  let usedCachedMeasures = false;
   try{
     const cached = readMeasuresCache_();
-    if(cached) applyMeasuresFromSheet_(cached.measures, 'Using cached measures');
+    if(cached){
+      applyMeasuresFromSheet_(cached.measures, 'Using cached measures');
+      usedCachedMeasures = true;
+    }
   } catch {}
 
   // Restore saved user progress (silent)
@@ -2634,7 +2638,12 @@ async function main(){
   }
 
   // Always attempt to load measures on startup (farmers should not need to click anything)
-  await loadConfigFromSheet(false);
+  // If we used cache, refresh in the background so updates in the sheet are picked up.
+  if(usedCachedMeasures){
+    loadConfigFromSheet(true);
+  } else {
+    await loadConfigFromSheet(true);
+  }
 
   bindMeasuresModal_();
   bindSection1();
