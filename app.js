@@ -24,9 +24,9 @@ const CRITERIA = [
   {id:2,name:'Soils covered',question:'% arable land covered ≥10 months/year',thresholds:{foundation:30,advanced:50,leading:70},unit:'%'},
   {id:3,name:'Cover crops',question:'% arable land with cover crops this year',thresholds:{foundation:10,advanced:30,leading:50},unit:'%'},
   {id:4,name:'Minimise soil disturbance',question:'% arable land under minimum tillage (<15 cm)',thresholds:{foundation:10,advanced:50,leading:70},unit:'%'},
-  // Criteria 5 & 6: temporary yes/no mapping
-  {id:5,name:'Integrated nutrient management principles',question:'Do you apply integrated nutrient management principles?',thresholds:{foundation:1,advanced:3,leading:4},unit:'yesno'},
-  {id:6,name:'Integrated pest management principles',question:'Do you apply integrated pest management principles?',thresholds:{foundation:1,advanced:3,leading:5},unit:'yesno'},
+  // Criteria 5 & 6: calculated from Synthetic inputs
+  {id:5,name:'Integrated nutrient management principles',question:'Calculated from the Synthetic inputs section.',thresholds:{leading:3},unit:'principles',calc:'synthetic'},
+  {id:6,name:'Integrated pest management principles',question:'Calculated from the Synthetic inputs section.',thresholds:{leading:3},unit:'principles',calc:'synthetic'},
   {id:7,name:'Land set aside for nature',question:'% land area set aside for nature (from nature infrastructure)',thresholds:{foundation:1,advanced:5,leading:5},unit:'%'}
 ];
 
@@ -142,7 +142,11 @@ const app = {
     },
     rotations: [],
     infrastructure: [],
-    criteria_inputs: { c2:null, c3:null, c4:null, c5:false, c6:false },
+    criteria_inputs: { c2:null, c3:null, c4:null },
+    synthetic_inputs: {
+      c5: { q1:null, q2:null, q3:null },
+      c6: { q1:null, q2:null, q3:null }
+    },
     crops: [],
     mrvCriteria: {} // C1..C7 for existing farms
   }
@@ -486,14 +490,14 @@ function levelFor(value, t){
 }
 
 function minLevel(levels){
-  const order=['entry','engaged','advanced','leading'];
+  const order=['below_entry','entry','engaged','advanced','leading'];
   return levels.reduce((m,lv)=> order.indexOf(lv)<order.indexOf(m)?lv:m,'leading');
 }
 
 function suggestedMeasures(measures, levelsByCrit){
   if(!measures || measures.length === 0) return [];
   const weak=new Set(Object.entries(levelsByCrit)
-    .filter(([,v])=>v==='entry'||v==='engaged')
+    .filter(([,v])=>v==='below_entry'||v==='entry'||v==='engaged')
     .map(([k])=>+k));
   return measures.filter(m=>m.contributes_to.some(c=>weak.has(c)));
 }
@@ -672,11 +676,15 @@ function setStepper(active){
       {key:'s2', label:'Baseline'},
       {key:'s3', label:'Rotations'},
       {key:'s4', label:'Nature infra'},
-      {key:'s5', label:'Criteria'},
-      {key:'s6', label:'Crops'},
-      {key:'s7', label:'Review'}
+      {key:'s5', label:'Synthetic inputs'},
+      {key:'s6', label:'Criteria'},
+      {key:'s7', label:'Crops'},
+      {key:'s8', label:'Review'}
     ] : []),
-    ...(app.flow === 'trade2025' ? [{key:'mrv', label:'MRV criteria'}] : []),
+    ...(app.flow === 'trade2025' ? [
+      {key:'syn', label:'Synthetic inputs'},
+      {key:'mrv', label:'MRV criteria'}
+    ] : []),
   ];
 
   const el = document.getElementById('stepper');
@@ -708,10 +716,14 @@ function updateStepperStatusesNew_(showMissing){
   const infraHasPartial = !!app.validation.infrastructure?.hasPartial;
   const infraOk = meta.agriM2 != null && infraHasOne && !infraHasPartial;
 
+  const syntheticOk = syntheticMeta_().allComplete;
   const c = computeCriteriaForNew();
   const requiredCrit = [1,2,3,4,7];
   const critMissing = requiredCrit.filter(k => c[k] == null);
-  if(showMissing) validateCriteriaSection(true);
+  if(showMissing){
+    validateCriteriaSection(true);
+    validateSyntheticSection(true, 'new');
+  }
 
   const cropsHasOne = app.validation.crops?.hasComplete || app.data.crops.length > 0;
   const cropsHasPartial = !!app.validation.crops?.hasPartial;
@@ -723,9 +735,10 @@ function updateStepperStatusesNew_(showMissing){
     s2: baselineMissing.length === 0,
     s3: rotHasOne && !rotHasPartial && !rotTooMuch,
     s4: infraOk,
-    s5: critMissing.length === 0,
-    s6: cropsOk,
-    s7: true
+    s5: syntheticOk,
+    s6: critMissing.length === 0,
+    s7: cropsOk,
+    s8: true
   };
 
   // Set done/warn
@@ -735,7 +748,7 @@ function updateStepperStatusesNew_(showMissing){
     else { app.done.delete(k); app.warn.add(k); }
   }
 
-  setStepper('s7');
+  setStepper('s8');
   return statuses;
 }
 
@@ -743,7 +756,9 @@ function updateStepperStatusesExisting_(showMissing){
   const s1ok = validateSection1(false).ok;
   const waterOk = validateWaterSection(showMissing).ok;
   if(showMissing) validateExisting(true);
+  if(showMissing) validateSyntheticSection(true, 'existing');
 
+  const syntheticOk = syntheticMeta_().allComplete;
   const required = [1,2,3,4,7];
   const mrvMissing = required.filter(i => app.data.mrvCriteria['C'+i] == null);
   const mrvOk = mrvMissing.length === 0;
@@ -751,16 +766,17 @@ function updateStepperStatusesExisting_(showMissing){
   app.warn = new Set();
   if(s1ok) app.done.add('s1'); else { app.done.delete('s1'); app.warn.add('s1'); }
   if(waterOk) app.done.add('s2w'); else { app.done.delete('s2w'); app.warn.add('s2w'); }
+  if(syntheticOk) app.done.add('syn'); else { app.done.delete('syn'); app.warn.add('syn'); }
   if(mrvOk) app.done.add('mrv'); else { app.done.delete('mrv'); app.warn.add('mrv'); }
 
   setStepper('mrv');
-  return { s1: s1ok, s2w: waterOk, mrv: mrvOk };
+  return { s1: s1ok, s2w: waterOk, syn: syntheticOk, mrv: mrvOk };
 }
 
 function markAllDoneForFlow_(){
   app.warn = new Set();
-  if(app.flow === 'new') ['s1','s2w','s2','s3','s4','s5','s6','s7'].forEach(k=> app.done.add(k));
-  if(app.flow === 'trade2025') ['s1','s2w','mrv'].forEach(k=> app.done.add(k));
+  if(app.flow === 'new') ['s1','s2w','s2','s3','s4','s5','s6','s7','s8'].forEach(k=> app.done.add(k));
+  if(app.flow === 'trade2025') ['s1','s2w','syn','mrv'].forEach(k=> app.done.add(k));
 }
 
 // ===============================
@@ -917,6 +933,18 @@ async function ensureMeasuresLoaded_(){
   return !!(app.measuresCfg && app.measuresMeta);
 }
 
+function isCalculatedCriterion_(mode, c){
+  if(c && c.calc === 'synthetic') return true;
+  if(mode === 'new' && (c.id === 1 || c.id === 7)) return true;
+  return false;
+}
+
+function formatLevelLabel_(lv){
+  if(!lv) return '—';
+  if(lv === 'below_entry') return 'Below entry';
+  return lv[0].toUpperCase() + lv.slice(1);
+}
+
 // ===============================
 // UI rendering (criteria cards)
 // ===============================
@@ -924,9 +952,11 @@ function renderCriteriaCards(container, mode){
   container.innerHTML='';
   for(const c of CRITERIA){
     const isYesNo = c.unit === 'yesno';
-    const isCalculated = (mode==='new' && (c.id===1 || c.id===7));
+    const isCalculated = isCalculatedCriterion_(mode, c);
+    const isSynthetic = c.calc === 'synthetic';
+    const unitSuffix = (c.unit === '%') ? '%' : (c.unit === 'principles' ? 'principles' : '');
 
-    const disabledAttr = (mode==='new' && isCalculated) ? 'disabled' : '';
+    const disabledAttr = isCalculated ? 'disabled' : '';
 
     const inputHtml = isYesNo
       ? `<label class="small" style="display:block;margin-top:10px">
@@ -934,8 +964,8 @@ function renderCriteriaCards(container, mode){
            Yes
          </label>`
       : `<div class="input-row" style="margin-top:10px">
-           <input id="crit-${mode}-${c.id}" type="number" ${disabledAttr} placeholder="${isCalculated?'Calculated':''}" min="0" step="1">
-           <span>${c.unit==='%'?'%':''}</span>
+           <input id="crit-${mode}-${c.id}" type="number" ${disabledAttr} placeholder="${isCalculated?'Calculated':''}" min="0" ${isSynthetic ? 'max="3"' : ''} step="1">
+           <span>${unitSuffix}</span>
            <span class="badge" id="badge-${mode}-${c.id}"><span class="dot"></span><span class="level" id="badge-text-${mode}-${c.id}">—</span></span>
          </div>`;
 
@@ -944,10 +974,11 @@ function renderCriteriaCards(container, mode){
         <div class="section-title">Criterion C${c.id}${isCalculated ? ' (calculated)' : ''}</div>
         <h3>${escapeHtml(c.name)}</h3>
         <div class="small">${escapeHtml(c.question)}</div>
-        ${rangeText(c.thresholds,c.unit)}
+        ${isSynthetic ? '' : rangeText(c.thresholds,c.unit)}
         ${inputHtml}
         ${isYesNo ? `<div class="input-row" style="margin-top:10px"><span class="badge" id="badge-${mode}-${c.id}"><span class="dot"></span><span class="level" id="badge-text-${mode}-${c.id}">—</span></span></div>` : ''}
-        ${isCalculated && mode==='new' ? `<div class="small" style="margin-top:8px">This is calculated from earlier sections.</div>` : ''}
+        ${isSynthetic ? `<div class="small" style="margin-top:8px">Leading if all 3 answers are Yes; otherwise below entry.</div>` : ''}
+        ${!isSynthetic && isCalculated && mode==='new' ? `<div class="small" style="margin-top:8px">This is calculated from earlier sections.</div>` : ''}
       </div>
     `);
   }
@@ -958,7 +989,7 @@ function setBadge(mode, cid, lv){
   const text = document.getElementById(`badge-text-${mode}-${cid}`);
   if(badge && text){
     badge.className = `badge ${lv||''}`;
-    text.textContent = lv ? (lv[0].toUpperCase()+lv.slice(1)) : '—';
+    text.textContent = formatLevelLabel_(lv);
   }
 }
 
@@ -1006,20 +1037,117 @@ function infraMeta(){
   return { totalImpactM2: total, agriM2, pct: clampPct(pct) };
 }
 
+function syntheticMeta_(){
+  const s = app.data.synthetic_inputs || {};
+  const pack = (key)=>{
+    const group = s[key] || {};
+    const vals = [group.q1, group.q2, group.q3];
+    const complete = vals.every(v => v === true || v === false);
+    const yesCount = vals.filter(v => v === true).length;
+    const allYes = complete && yesCount === 3;
+    return { yesCount, complete, allYes };
+  };
+  const c5 = pack('c5');
+  const c6 = pack('c6');
+  return { c5, c6, allComplete: c5.complete && c6.complete };
+}
+
+const SYNTHETIC_QUESTIONS = [
+  { key:'c5.q1', label:'Integrated nutrient management: Legal compliance' },
+  { key:'c5.q2', label:'Integrated nutrient management: Planning' },
+  { key:'c5.q3', label:'Integrated nutrient management: Evidence' },
+  { key:'c6.q1', label:'Integrated pest management: Legal compliance' },
+  { key:'c6.q2', label:'Integrated pest management: Good practice at handling' },
+  { key:'c6.q3', label:'Integrated pest management: Planning' }
+];
+
+function setSyntheticValue_(key, value){
+  const [crit, q] = key.split('.');
+  if(!crit || !q) return;
+  if(!app.data.synthetic_inputs) app.data.synthetic_inputs = { c5:{}, c6:{} };
+  if(!app.data.synthetic_inputs[crit]) app.data.synthetic_inputs[crit] = {};
+  app.data.synthetic_inputs[crit][q] = value;
+}
+
+function syncSyntheticFromDom_(){
+  for(const q of SYNTHETIC_QUESTIONS){
+    const el = document.querySelector(`[data-synthetic="${q.key}"]`);
+    setSyntheticValue_(q.key, yesNoToBool(el?.value));
+  }
+}
+
+function updateSyntheticCriteriaDisplays_(){
+  const syn = syntheticMeta_();
+  setCriterionValue('new', 5, syn.c5.yesCount);
+  setCriterionValue('new', 6, syn.c6.yesCount);
+  setCriterionValue('existing', 5, syn.c5.yesCount);
+  setCriterionValue('existing', 6, syn.c6.yesCount);
+}
+
+function validateSyntheticSection(showMissing, flow){
+  const meta = syntheticMeta_();
+  const ok = meta.allComplete;
+
+  const btnId = (flow === 'existing') ? 'synth-next' : 's5-next';
+  const statusId = (flow === 'existing') ? 'synth-status' : 's5-status';
+  const btn = document.getElementById(btnId);
+  if(btn){
+    btn.classList.toggle('disabled', !ok);
+    setAriaDisabled_(btn, !ok);
+  }
+
+  const status = document.getElementById(statusId);
+  if(status){
+    if(ok){
+      status.textContent = '';
+      status.classList.remove('err','warn');
+    } else if(showMissing){
+      status.textContent = 'Please answer all Synthetic inputs questions.';
+      status.classList.remove('err');
+      status.classList.add('warn');
+    } else {
+      status.textContent = '';
+      status.classList.remove('err','warn');
+    }
+  }
+
+  return { ok };
+}
+
+function syntheticCriterionLevel_(cid){
+  const meta = syntheticMeta_();
+  const group = cid === 5 ? meta.c5 : meta.c6;
+  if(!group.complete) return null;
+  return group.allYes ? 'leading' : 'below_entry';
+}
+
+function criterionLevelForValue_(cid, value){
+  if(cid === 5 || cid === 6) return syntheticCriterionLevel_(cid);
+  const c = CRITERIA.find(x=> x.id === cid);
+  if(!c) return null;
+  return value == null ? null : levelFor(value, c.thresholds);
+}
+
 function computeCriteriaForNew(){
   const c1 = calcRotationCriterion1();
   const c7 = infraMeta().pct;
   const c2 = app.data.criteria_inputs.c2;
   const c3 = app.data.criteria_inputs.c3;
   const c4 = app.data.criteria_inputs.c4;
-  const c5 = app.data.criteria_inputs.c5 ? 1 : 0;
-  const c6 = app.data.criteria_inputs.c6 ? 1 : 0;
+  const syn = syntheticMeta_();
+  const c5 = syn.c5.yesCount;
+  const c6 = syn.c6.yesCount;
   return { 1:c1, 2:c2, 3:c3, 4:c4, 5:c5, 6:c6, 7:c7 };
 }
 
 function computeCriteriaForExisting(){
   const out = {};
   for(let i=1;i<=7;i++){
+    if(i === 5 || i === 6){
+      const syn = syntheticMeta_();
+      out[i] = (i === 5 ? syn.c5.yesCount : syn.c6.yesCount);
+      continue;
+    }
     const v = app.data.mrvCriteria['C'+i];
     out[i] = v == null ? null : v;
   }
@@ -1030,7 +1158,7 @@ function criteriaLevelsFromValues(values){
   const levels = {};
   for(const c of CRITERIA){
     const v = values[c.id];
-    const lv = (v==null) ? null : levelFor(v, c.thresholds);
+    const lv = criterionLevelForValue_(c.id, v);
     levels[c.id] = lv;
   }
   return levels;
@@ -1055,7 +1183,13 @@ function waterOverrideEligible_(measure){
 
 function selectEligibleMeasures(criteriaValues){
   const levels = criteriaLevelsFromValues(criteriaValues);
-  const overall = overallFromLevels(levels);
+  const levelsForNonResilience = {};
+  for(const c of CRITERIA){
+    if(c.id === 5 || c.id === 6) continue;
+    levelsForNonResilience[c.id] = levels[c.id];
+  }
+  const overall = overallFromLevels(levelsForNonResilience);
+  const resilienceOk = (levels[5] === 'leading' && levels[6] === 'leading');
 
   // Eligible measures
   let eligible = [];
@@ -1063,9 +1197,9 @@ function selectEligibleMeasures(criteriaValues){
   const allActive = effectiveMeasures();
   const waterEligible = allActive.filter(m=> waterOverrideEligible_(m));
   if(overall === 'advanced' || overall === 'leading'){
-    eligible = [renderResiliencePayment()];
+    eligible = resilienceOk ? [renderResiliencePayment()] : [];
   } else {
-    eligible = suggestedMeasures(baseCandidates, levels);
+    eligible = suggestedMeasures(baseCandidates, levelsForNonResilience);
   }
   if(waterEligible.length){
     const seen = new Set(eligible.map(m=>m.code));
@@ -1091,7 +1225,7 @@ function selectEligibleMeasures(criteriaValues){
 function criteriaSummaryTable(values, levels){
   const badgeHtml = (lv)=>{
     if(!lv) return '—';
-    const label = lv[0].toUpperCase() + lv.slice(1);
+    const label = formatLevelLabel_(lv);
     return `<span class="badge ${lv}"><span class="dot"></span><span class="level">${label}</span></span>`;
   };
 
@@ -1100,7 +1234,9 @@ function criteriaSummaryTable(values, levels){
     const lv = levels[c.id];
     const disp = (v==null)
       ? '—'
-      : (c.unit === 'yesno' ? (v>=1 ? 'Yes' : 'No') : `${v}${c.unit==='%'?'%':''}`);
+      : (c.unit === 'yesno'
+        ? (v>=1 ? 'Yes' : 'No')
+        : (c.unit === 'principles' ? `${v} principles` : `${v}${c.unit==='%'?'%':''}`));
 
     return `<tr>
       <td class="mono">C${c.id}</td>
@@ -1395,11 +1531,46 @@ function bindInfrastructure(){
   recalc();
 }
 
+function bindSyntheticInputs(){
+  const fields = [...document.querySelectorAll('[data-synthetic]')];
+  if(!fields.length) return;
+
+  function onChange(e){
+    const el = e.target.closest('[data-synthetic]');
+    if(!el) return;
+    const key = el.getAttribute('data-synthetic');
+    const value = yesNoToBool(el.value);
+    setSyntheticValue_(key, value);
+    document.querySelectorAll(`[data-synthetic="${key}"]`).forEach(other=>{
+      if(other !== el) other.value = boolToYesNo(value);
+    });
+    if(app.flow === 'new') markSubmitDirty_('new');
+    if(app.flow === 'trade2025') markSubmitDirty_('trade2025');
+    updateSyntheticCriteriaDisplays_();
+    validateSyntheticSection(false, 'new');
+    validateSyntheticSection(false, 'existing');
+    validateCriteriaSection(false);
+    validateExisting(false);
+    updateReview();
+    updateSubmitNewState();
+  }
+
+  fields.forEach(el=>{
+    el.addEventListener('change', onChange);
+    el.addEventListener('input', onChange);
+  });
+
+  syncSyntheticFromDom_();
+  updateSyntheticCriteriaDisplays_();
+  validateSyntheticSection(false, 'new');
+  validateSyntheticSection(false, 'existing');
+}
+
 function bindCrops(){
   const tbody = document.querySelector('#crops-table tbody');
   const addBtn = document.getElementById('crops-add');
   const summary = document.getElementById('crops-summary');
-  const status = document.getElementById('s6-status');
+  const status = document.getElementById('s7-status');
 
   function syncFromDom(){
     const rows = [...tbody.querySelectorAll('tr')];
@@ -1457,7 +1628,7 @@ function bindCrops(){
       summary.textContent = n ? `${n} crop${n===1?'':'s'} added` : 'No crops added yet.';
     }
 
-    const next = document.getElementById('s6-next');
+    const next = document.getElementById('s7-next');
     const ok = hasComplete && !hasPartial;
     next.classList.toggle('disabled', !ok);
     setAriaDisabled_(next, !ok);
@@ -1532,7 +1703,7 @@ function setCriterionValue(mode, cid, value){
     el.value = (value == null ? '' : String(value));
   }
 
-  const lv = (value==null) ? null : levelFor(value, c.thresholds);
+  const lv = criterionLevelForValue_(cid, value);
   setBadge(mode, cid, lv);
 }
 
@@ -1556,26 +1727,11 @@ function bindCriteriaNew(){
     });
   }
 
-  [5,6].forEach(cid=>{
-    const el = document.getElementById(`crit-new-${cid}`);
-    el?.addEventListener('change', ()=>{
-      if(cid===5) app.data.criteria_inputs.c5 = !!el.checked;
-      if(cid===6) app.data.criteria_inputs.c6 = !!el.checked;
-      const v = el.checked ? 1 : 0;
-      setBadge('new', cid, levelFor(v, CRITERIA.find(x=>x.id===cid).thresholds));
-      markSubmitDirty_('new');
-      validateCriteriaSection(false);
-      updateReview();
-    });
-  });
-
   setCriterionValue('new', 1, calcRotationCriterion1());
   setCriterionValue('new', 7, infraMeta().pct);
-
-  [5,6].forEach(cid=>{
-    const v = (cid===5 ? (app.data.criteria_inputs.c5 ? 1 : 0) : (app.data.criteria_inputs.c6 ? 1 : 0));
-    setBadge('new', cid, levelFor(v, CRITERIA.find(x=>x.id===cid).thresholds));
-  });
+  const syn = syntheticMeta_();
+  setCriterionValue('new', 5, syn.c5.yesCount);
+  setCriterionValue('new', 6, syn.c6.yesCount);
 
   validateCriteriaSection(false);
 }
@@ -1587,11 +1743,18 @@ function bindCriteriaExisting(){
     const el = document.getElementById(`crit-existing-${c.id}`);
     if(!el) continue;
 
+    if(c.calc === 'synthetic'){
+      const syn = syntheticMeta_();
+      const value = (c.id === 5 ? syn.c5.yesCount : syn.c6.yesCount);
+      setCriterionValue('existing', c.id, value);
+      continue;
+    }
+
     if(c.unit === 'yesno'){
       el.addEventListener('change', ()=>{
         const v = el.checked ? 1 : 0;
         app.data.mrvCriteria['C'+c.id] = v;
-        setBadge('existing', c.id, levelFor(v, c.thresholds));
+        setBadge('existing', c.id, criterionLevelForValue_(c.id, v));
         markSubmitDirty_('trade2025');
         validateExisting(false);
       });
@@ -1600,7 +1763,7 @@ function bindCriteriaExisting(){
         const raw = el.value.trim();
         const v = raw==='' ? null : clampPct(Number(raw));
         app.data.mrvCriteria['C'+c.id] = v;
-        setBadge('existing', c.id, v==null ? null : levelFor(v, c.thresholds));
+        setBadge('existing', c.id, v==null ? null : criterionLevelForValue_(c.id, v));
         markSubmitDirty_('trade2025');
         validateExisting(false);
       });
@@ -1619,15 +1782,15 @@ function validateCriteriaSection(showMissing){
     const v = values[c.id];
     if(v==null) { setBadge('new', c.id, null); continue; }
     if(c.unit === 'yesno') continue;
-    setBadge('new', c.id, levelFor(v, c.thresholds));
+    setBadge('new', c.id, criterionLevelForValue_(c.id, v));
   }
 
-  const next = document.getElementById('s5-next');
+  const next = document.getElementById('s6-next');
   const ok = missing.length === 0;
   next.classList.toggle('disabled', !ok);
   setAriaDisabled_(next, !ok);
 
-  const status = document.getElementById('s5-status');
+  const status = document.getElementById('s6-status');
   if(status){
     if(ok){
       status.textContent = '';
@@ -1647,9 +1810,10 @@ function validateExisting(showMissing){
   const required = [1,2,3,4,7];
   const missing = required.filter(i => app.data.mrvCriteria['C'+i] == null);
   const waterOk = app.data.water && app.data.water.anglian != null && app.data.water.affinity != null;
+  const syntheticOk = syntheticMeta_().allComplete;
 
   const btn = document.getElementById('submit-existing');
-  const ok = missing.length === 0 && waterOk;
+  const ok = missing.length === 0 && waterOk && syntheticOk;
   btn.classList.toggle('disabled', !ok);
   setAriaDisabled_(btn, !ok);
   if(ok && app.submitState.trade2025 !== 'loading') syncSubmitState_('trade2025');
@@ -1661,6 +1825,10 @@ function validateExisting(showMissing){
       status.classList.remove('err','warn');
     } else if(!waterOk){
       status.textContent = 'Please complete Water catchment eligibility (Section 2).';
+      status.classList.remove('err');
+      status.classList.add('warn');
+    } else if(!syntheticOk){
+      status.textContent = 'Please complete Synthetic inputs (Section 3).';
       status.classList.remove('err');
       status.classList.add('warn');
     } else {
@@ -1879,9 +2047,9 @@ function bindWaterSection(){
       setStepper('s2');
       scrollToId('sec-3');
     } else if(app.flow === 'trade2025'){
-      setLocked('sec-x', false);
-      setStepper('mrv');
-      scrollToId('sec-x');
+      setLocked('sec-synth', false);
+      setStepper('syn');
+      scrollToId('sec-synth');
     }
   });
 
@@ -1974,10 +2142,11 @@ function setLocked(id, locked){
 function initLocksForFlow_(){
   if(app.flow === 'new'){
     setLocked('sec-2', false);
-    ['sec-3','sec-4','sec-5','sec-6','sec-7','sec-8','sec-out-new'].forEach(id=> setLocked(id, true));
+    ['sec-3','sec-4','sec-5','sec-6','sec-7','sec-8','sec-9','sec-out-new'].forEach(id=> setLocked(id, true));
   }
   if(app.flow === 'trade2025'){
     setLocked('sec-2', false);
+    setLocked('sec-synth', true);
     setLocked('sec-x', true);
     setLocked('sec-out-existing', true);
   }
@@ -1993,11 +2162,13 @@ function applyLocksFromProgress_(){
     if(app.done.has('s4')) setLocked('sec-6', false);
     if(app.done.has('s5')) setLocked('sec-7', false);
     if(app.done.has('s6')) setLocked('sec-8', false);
+    if(app.done.has('s7')) setLocked('sec-9', false);
     if(app.submitted) setLocked('sec-out-new', false);
   }
 
   if(app.flow === 'trade2025'){
-    if(app.done.has('s2w')) setLocked('sec-x', false);
+    if(app.done.has('s2w')) setLocked('sec-synth', false);
+    if(app.done.has('syn')) setLocked('sec-x', false);
     if(app.submitted) setLocked('sec-out-existing', false);
   }
 }
@@ -2024,7 +2195,7 @@ function bindNewNav(){
   });
 
   document.getElementById('s5-next')?.addEventListener('click', ()=>{
-    validateCriteriaSection(true);
+    validateSyntheticSection(true, 'new');
     if(document.getElementById('s5-next').getAttribute('aria-disabled') === 'true') return;
     markDone('s5');
     setLocked('sec-7', false);
@@ -2033,15 +2204,35 @@ function bindNewNav(){
   });
 
   document.getElementById('s6-next')?.addEventListener('click', ()=>{
-    if(document.getElementById('s6-next').getAttribute('aria-disabled') === 'true'){
-      return;
-    }
+    validateCriteriaSection(true);
+    if(document.getElementById('s6-next').getAttribute('aria-disabled') === 'true') return;
     markDone('s6');
     setLocked('sec-8', false);
     setStepper('s7');
     scrollToId('sec-8');
+  });
+
+  document.getElementById('s7-next')?.addEventListener('click', ()=>{
+    if(document.getElementById('s7-next').getAttribute('aria-disabled') === 'true'){
+      return;
+    }
+    markDone('s7');
+    setLocked('sec-9', false);
+    setStepper('s8');
+    scrollToId('sec-9');
     updateReview();
     updateSubmitNewState();
+  });
+}
+
+function bindSyntheticNav(){
+  document.getElementById('synth-next')?.addEventListener('click', ()=>{
+    validateSyntheticSection(true, 'existing');
+    if(document.getElementById('synth-next').getAttribute('aria-disabled') === 'true') return;
+    markDone('syn');
+    setLocked('sec-x', false);
+    setStepper('mrv');
+    scrollToId('sec-x');
   });
 }
 
@@ -2075,8 +2266,8 @@ function updateReview(){
       </div>
       <div class="card" style="box-shadow:none">
         <div class="section-title">Current pathway</div>
-        <div class="small">Overall level is the lowest of your criteria levels.</div>
-        <div class="small">Overall: <strong>${overall ? overall[0].toUpperCase()+overall.slice(1) : '—'}</strong></div>
+        <div class="small">Overall level is based on Criteria 1–4 and 7. Criteria 5–6 only affect the Resilience Payment.</div>
+        <div class="small">Overall: <strong>${formatLevelLabel_(overall)}</strong></div>
       </div>
     </div>
 
@@ -2106,7 +2297,8 @@ function updateSubmitNewState(){
   const infraOk = app.validation.infrastructure?.hasComplete && !app.validation.infrastructure?.hasPartial && infraMeta().agriM2 != null;
   const cropsOk = app.validation.crops?.hasComplete && !app.validation.crops?.hasPartial;
   const waterOk = app.data.water && app.data.water.anglian != null && app.data.water.affinity != null;
-  const ok = missing.length === 0 && rotOk && infraOk && cropsOk && waterOk;
+  const syntheticOk = syntheticMeta_().allComplete;
+  const ok = missing.length === 0 && rotOk && infraOk && cropsOk && waterOk && syntheticOk;
   btn.classList.toggle('disabled', !ok);
   setAriaDisabled_(btn, !ok);
   if(ok) syncSubmitState_('new');
@@ -2124,8 +2316,7 @@ function buildSubmissionPayload(flow, criteriaValues, selection){
     const key = `C${c.id}:${c.name.replaceAll('Integrated nutrient management principles','Nutrient principles').replaceAll('Integrated pest management principles','IPM principles')}`;
     answers[key] = (v==null ? null : v);
 
-    const lv = (v==null ? null : levelFor(v, c.thresholds));
-    levels[`C${c.id}`] = lv;
+    levels[`C${c.id}`] = criterionLevelForValue_(c.id, v);
   }
 
   const overall = selection.overall;
@@ -2203,8 +2394,10 @@ function printNewFarm_(selection, criteriaValues, levels){
 
   const critRows = CRITERIA.map(c=>{
     const v = criteriaValues[c.id];
-    const disp = (c.unit === 'yesno') ? yesNo(v) : fmt(v, c.unit==='%'?'%':'');
-    const lv = levels[c.id] ? (levels[c.id][0].toUpperCase()+levels[c.id].slice(1)) : '—';
+    const disp = (c.unit === 'yesno')
+      ? yesNo(v)
+      : (c.unit === 'principles' ? (v==null ? '—' : `${v} principles`) : fmt(v, c.unit==='%'?'%':''));
+    const lv = formatLevelLabel_(levels[c.id]);
     return `<tr><td class="mono">C${c.id}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(String(disp))}</td><td>${escapeHtml(lv)}</td></tr>`;
   }).join('');
 
@@ -2337,8 +2530,10 @@ function printExistingFarm_(selection, criteriaValues, levels){
 
   const critRows = CRITERIA.map(c=>{
     const v = criteriaValues[c.id];
-    const disp = (c.unit === 'yesno') ? yesNo(v) : fmt(v, c.unit==='%'?'%':'');
-    const lv = levels[c.id] ? (levels[c.id][0].toUpperCase()+levels[c.id].slice(1)) : '—';
+    const disp = (c.unit === 'yesno')
+      ? yesNo(v)
+      : (c.unit === 'principles' ? (v==null ? '—' : `${v} principles`) : fmt(v, c.unit==='%'?'%':''));
+    const lv = formatLevelLabel_(levels[c.id]);
     return `<tr><td class="mono">C${c.id}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(String(disp))}</td><td>${escapeHtml(lv)}</td></tr>`;
   }).join('');
 
@@ -2447,6 +2642,7 @@ function bindExistingSubmit(){
 
   btn?.addEventListener('click', async ()=>{
     validateExisting(true);
+    validateSyntheticSection(true, 'existing');
     if(btn.getAttribute('aria-disabled') === 'true'){
       updateStepperStatusesExisting_(true);
       return;
@@ -2458,12 +2654,6 @@ function bindExistingSubmit(){
     if(status){
       status.textContent = '';
       status.classList.remove('err');
-    }
-
-    // Default C5/C6 if not provided
-    for(let i=5;i<=6;i++){
-      const k = 'C'+i;
-      if(app.data.mrvCriteria[k] == null) app.data.mrvCriteria[k] = 0;
     }
 
     // Always try to ensure measures are loaded so we can show eligible + ineligible lists
@@ -2539,6 +2729,7 @@ function bindNewSubmit(){
   btn?.addEventListener('click', async ()=>{
     // On submit attempt, show missing markers where applicable
     validateCriteriaSection(true);
+    validateSyntheticSection(true, 'new');
 
     if(btn.getAttribute('aria-disabled') === 'true'){
       updateStepperStatusesNew_(true);
@@ -2581,7 +2772,7 @@ function bindNewSubmit(){
       app.submitted = true;
       markAllDoneForFlow_();
       setLocked('sec-out-new', false);
-      setStepper('s7');
+      setStepper('s8');
 
       hint.textContent = 'These are the measures you can apply for in NatureBid.';
       renderMeasuresThreeColumns(out, selection.measures);
@@ -2636,6 +2827,10 @@ function resetAll(){
     if(el) el.value = '';
   });
 
+  document.querySelectorAll('[data-synthetic]')?.forEach(el=>{
+    el.value = '';
+  });
+
   ['s2-agri','s2-arable','s2-perm-crop','s2-pasture','s2-habitat','s2-livestock','s2-fuel'].forEach(id=>{
     const el = document.getElementById(id); if(el) el.value='';
   });
@@ -2644,7 +2839,11 @@ function resetAll(){
   document.querySelector('#infra-table tbody')?.replaceChildren();
   document.querySelector('#crops-table tbody')?.replaceChildren();
 
-  app.data.criteria_inputs = { c2:null, c3:null, c4:null, c5:false, c6:false };
+  app.data.criteria_inputs = { c2:null, c3:null, c4:null };
+  app.data.synthetic_inputs = {
+    c5: { q1:null, q2:null, q3:null },
+    c6: { q1:null, q2:null, q3:null }
+  };
   app.data.mrvCriteria = {};
 
   app.flow = null;
@@ -2680,7 +2879,7 @@ function resetAll(){
   if(document.getElementById('measures-new-hint')) document.getElementById('measures-new-hint').textContent='Submit responses to see eligible measures.';
   if(document.getElementById('measures-existing-hint')) document.getElementById('measures-existing-hint').textContent='Enter your MRV criteria values and click submit to see eligible measures.';
 
-  ['s1-status','s2w-status','s2-status','s3-status','s4-status','s5-status','s6-status','submit-status','existing-status'].forEach(id=>{
+  ['s1-status','s2w-status','s2-status','s3-status','s4-status','s5-status','s6-status','s7-status','synth-status','submit-status','existing-status'].forEach(id=>{
     const el = document.getElementById(id); if(el){ el.textContent=''; el.classList.remove('err','warn'); }
   });
 
@@ -2698,6 +2897,9 @@ function resetAll(){
 
   bindCriteriaNew();
   bindCriteriaExisting();
+  updateSyntheticCriteriaDisplays_();
+  validateSyntheticSection(false, 'new');
+  validateSyntheticSection(false, 'existing');
 
   validateSection1(false);
   validateWaterSection(false);
@@ -2761,10 +2963,18 @@ function readDomAutosaveState_(){
     criteria_inputs: {
       c2: clampPct(numVal('crit-new-2')),
       c3: clampPct(numVal('crit-new-3')),
-      c4: clampPct(numVal('crit-new-4')),
-      c5: !!document.getElementById('crit-new-5')?.checked,
-      c6: !!document.getElementById('crit-new-6')?.checked
+      c4: clampPct(numVal('crit-new-4'))
     },
+    synthetic_inputs: (function(){
+      const out = { c5:{}, c6:{} };
+      for(const q of SYNTHETIC_QUESTIONS){
+        const el = document.querySelector(`[data-synthetic="${q.key}"]`);
+        setSyntheticValue_(q.key, yesNoToBool(el?.value));
+      }
+      out.c5 = { ...(app.data.synthetic_inputs?.c5 || {}) };
+      out.c6 = { ...(app.data.synthetic_inputs?.c6 || {}) };
+      return out;
+    })(),
     crops: [...document.querySelectorAll('#crops-table tbody tr')].map(tr=>({
       id: tr.dataset.id || uid('crop'),
       crop: tr.querySelector('[data-k="crop"]')?.value?.trim() || '',
@@ -2778,7 +2988,7 @@ function readDomAutosaveState_(){
       for(let i=1;i<=7;i++){
         const c = CRITERIA.find(x=>x.id===i);
         const el = document.getElementById(`crit-existing-${i}`);
-        if(!el || !c) continue;
+        if(!el || !c || c.calc === 'synthetic') continue;
         if(c.unit === 'yesno') out['C'+i] = el.checked ? 1 : 0;
         else {
           const raw = el.value.trim();
@@ -2839,6 +3049,17 @@ function restoreAutosaveToDom_(state){
     if(document.getElementById('s2-anglian')) document.getElementById('s2-anglian').value = boolToYesNo(w.anglian);
     if(document.getElementById('s2-affinity')) document.getElementById('s2-affinity').value = boolToYesNo(w.affinity);
     app.data.water = { anglian: yesNoToBool(w.anglian), affinity: yesNoToBool(w.affinity) };
+  }
+
+  if(state.synthetic_inputs){
+    app.data.synthetic_inputs = state.synthetic_inputs;
+    for(const q of SYNTHETIC_QUESTIONS){
+      const [crit, key] = q.key.split('.');
+      const value = state.synthetic_inputs?.[crit]?.[key] ?? null;
+      document.querySelectorAll(`[data-synthetic="${q.key}"]`).forEach(el=>{
+        el.value = boolToYesNo(value);
+      });
+    }
   }
 
   // Baseline
@@ -2917,6 +3138,7 @@ function restoreAutosaveToDom_(state){
 
   // Stash non-table values; will be applied after criteria cards are rendered
   app.data.criteria_inputs = state.criteria_inputs || app.data.criteria_inputs;
+  app.data.synthetic_inputs = state.synthetic_inputs || app.data.synthetic_inputs;
   app.data.mrvCriteria = state.mrvCriteria || app.data.mrvCriteria;
   app.submitted = !!state.submitted;
   app.submitDirty = state.submitDirty || { new:false, trade2025:false };
@@ -2931,8 +3153,6 @@ function applyRestoredCriteriaToDom_(){
     if(document.getElementById('crit-new-2')) document.getElementById('crit-new-2').value = (app.data.criteria_inputs.c2 == null ? '' : String(app.data.criteria_inputs.c2));
     if(document.getElementById('crit-new-3')) document.getElementById('crit-new-3').value = (app.data.criteria_inputs.c3 == null ? '' : String(app.data.criteria_inputs.c3));
     if(document.getElementById('crit-new-4')) document.getElementById('crit-new-4').value = (app.data.criteria_inputs.c4 == null ? '' : String(app.data.criteria_inputs.c4));
-    if(document.getElementById('crit-new-5')) document.getElementById('crit-new-5').checked = !!app.data.criteria_inputs.c5;
-    if(document.getElementById('crit-new-6')) document.getElementById('crit-new-6').checked = !!app.data.criteria_inputs.c6;
   }
 
   // Existing MRV criteria
@@ -2942,10 +3162,13 @@ function applyRestoredCriteriaToDom_(){
       const el = document.getElementById(`crit-existing-${i}`);
       if(!el || !c) continue;
       const v = app.data.mrvCriteria['C'+i];
+      if(c.calc === 'synthetic') continue;
       if(c.unit === 'yesno') el.checked = (v != null && Number(v) >= 1);
       else el.value = (v == null ? '' : String(v));
     }
   }
+
+  updateSyntheticCriteriaDisplays_();
 }
 
 // ===============================
@@ -2955,16 +3178,30 @@ function bindResets(){
   document.getElementById('reset-new')?.addEventListener('click', ()=> resetAll());
   document.getElementById('reset-existing')?.addEventListener('click', ()=>{
     app.data.mrvCriteria = {};
+    app.data.synthetic_inputs = {
+      c5: { q1:null, q2:null, q3:null },
+      c6: { q1:null, q2:null, q3:null }
+    };
+    document.querySelectorAll('[data-synthetic]')?.forEach(el=>{
+      el.value = '';
+    });
     app.submitted = false;
     app.submitDirty.trade2025 = false;
     setSubmitState_('trade2025', 'ready');
     for(const c of CRITERIA){
       const el = document.getElementById(`crit-existing-${c.id}`);
       if(!el) continue;
-      if(c.unit === 'yesno') el.checked = false;
-      else el.value = '';
+      if(c.calc === 'synthetic'){
+        el.value = '';
+      } else if(c.unit === 'yesno') {
+        el.checked = false;
+      } else {
+        el.value = '';
+      }
       setBadge('existing', c.id, null);
     }
+    updateSyntheticCriteriaDisplays_();
+    validateSyntheticSection(false, 'existing');
     validateExisting(false);
     document.getElementById('measures-existing').innerHTML='';
     document.getElementById('measures-existing-hint').textContent = 'Enter your MRV criteria values and click submit to see eligible measures.';
@@ -3041,6 +3278,8 @@ async function main(){
   bindNewSubmit();
 
   bindCriteriaExisting();
+  bindSyntheticInputs();
+  bindSyntheticNav();
   bindExistingSubmit();
 
   // Apply restored criteria values after the cards exist
@@ -3055,7 +3294,7 @@ async function main(){
 
   // If we restored a flow, compute current step & re-render outputs if previously submitted
   if(app.flow){
-    const activeKey = app.submitted ? (app.flow === 'new' ? 's7' : 'mrv') : (app.flow === 'new' ? 's2w' : 's2w');
+    const activeKey = app.submitted ? (app.flow === 'new' ? 's8' : 'mrv') : (app.flow === 'new' ? 's2w' : 's2w');
     setStepper(activeKey);
 
     if(app.submitted){

@@ -243,13 +243,87 @@
           <div class="small status-msg" id="s4-status"></div>
         </div>
 
-        <!-- SECTION 6: Regen criteria (new farms) -->
+        <!-- SECTION 6: Synthetic inputs -->
         <div class="card locked" id="sec-6">
           <div class="section-title">Section 6</div>
-          <h2>Regen pathway criteria</h2>
-          <div class="small">Criteria values are calculated and captured below. Some are based on your earlier sections.</div>
+          <h2>Synthetic inputs</h2>
+          <div class="small">All questions are required to proceed.</div>
 
-          <div class="grid" style="margin-top:10px" id="criteria-new"></div>
+          <div class="divider"></div>
+          <h3>Integrated nutrient management (C5)</h3>
+          <div class="grid" style="margin-top:10px">
+            <div>
+              <div class="field-label">Legal compliance</div>
+              <div class="small">Meet all requirements under the Farming Rules for Water (and related regulations).</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c5.q1" data-flow="new" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="field-label">Planning</div>
+              <div class="small">Have a nutrient management plan in place (or formally planned) for 2026/27.</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c5.q2" data-flow="new" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="field-label">Evidence</div>
+              <div class="small">Complete soil tests at least once every 4 years on any land receiving nutrient inputs (from 2026).</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c5.q3" data-flow="new" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+          <h3>Integrated pest management (C6)</h3>
+          <div class="grid" style="margin-top:10px">
+            <div>
+              <div class="field-label">Legal compliance</div>
+              <div class="small">Comply with the Sustainable Use of Pesticides legislation.</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c6.q1" data-flow="new" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="field-label">Good practice at handling</div>
+              <div class="small">Use drip trays when filling; dispose of caps/seals responsibly.</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c6.q2" data-flow="new" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="field-label">Planning</div>
+              <div class="small">Develop, maintain, and use an effective written IPM plan during 2026/27.</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c6.q3" data-flow="new" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+          </div>
 
           <div class="flex" style="justify-content:flex-end;margin-top:14px">
             <button class="btn" id="s5-next" type="button" aria-disabled="true" disabled>Next</button>
@@ -257,9 +331,23 @@
           <div class="small status-msg" id="s5-status"></div>
         </div>
 
-        <!-- SECTION 7: Crop information -->
+        <!-- SECTION 7: Regen criteria (new farms) -->
         <div class="card locked" id="sec-7">
           <div class="section-title">Section 7</div>
+          <h2>Regen pathway criteria</h2>
+          <div class="small">Criteria values are calculated and captured below. Some are based on your earlier sections.</div>
+
+          <div class="grid" style="margin-top:10px" id="criteria-new"></div>
+
+          <div class="flex" style="justify-content:flex-end;margin-top:14px">
+            <button class="btn" id="s6-next" type="button" aria-disabled="true" disabled>Next</button>
+          </div>
+          <div class="small status-msg" id="s6-status"></div>
+        </div>
+
+        <!-- SECTION 8: Crop information -->
+        <div class="card locked" id="sec-8">
+          <div class="section-title">Section 8</div>
           <h2>Crop information</h2>
           <div class="small">Add one or more crops.</div>
 
@@ -285,14 +373,14 @@
           </div>
 
           <div class="flex" style="justify-content:flex-end;margin-top:14px">
-            <button class="btn" id="s6-next" type="button" aria-disabled="true" disabled>Next</button>
+            <button class="btn" id="s7-next" type="button" aria-disabled="true" disabled>Next</button>
           </div>
-          <div class="small status-msg" id="s6-status"></div>
+          <div class="small status-msg" id="s7-status"></div>
         </div>
 
-        <!-- SECTION 8: Review & Submit -->
-        <div class="card locked" id="sec-8">
-          <div class="section-title">Section 8</div>
+        <!-- SECTION 9: Review & Submit -->
+        <div class="card locked" id="sec-9">
+          <div class="section-title">Section 9</div>
           <h2>Review &amp; submit</h2>
           <div class="small">Please review your data and calculated criteria. When ready, submit to view eligible measures.</div>
 
@@ -349,10 +437,97 @@
       <!-- EXISTING TRADE 2025 PATHWAY -->
       <div id="existing-flow" class="hide">
 
-        <div class="card locked" id="sec-x">
+        <div class="card locked" id="sec-synth">
           <div class="section-title">Section 3</div>
+          <h2>Synthetic inputs</h2>
+          <div class="small">All questions are required to proceed.</div>
+
+          <div class="divider"></div>
+          <h3>Integrated nutrient management (C5)</h3>
+          <div class="grid" style="margin-top:10px">
+            <div>
+              <div class="field-label">Legal compliance</div>
+              <div class="small">Meet all requirements under the Farming Rules for Water (and related regulations).</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c5.q1" data-flow="existing" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="field-label">Planning</div>
+              <div class="small">Have a nutrient management plan in place (or formally planned) for 2026/27.</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c5.q2" data-flow="existing" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="field-label">Evidence</div>
+              <div class="small">Complete soil tests at least once every 4 years on any land receiving nutrient inputs (from 2026).</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c5.q3" data-flow="existing" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+          <h3>Integrated pest management (C6)</h3>
+          <div class="grid" style="margin-top:10px">
+            <div>
+              <div class="field-label">Legal compliance</div>
+              <div class="small">Comply with the Sustainable Use of Pesticides legislation.</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c6.q1" data-flow="existing" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="field-label">Good practice at handling</div>
+              <div class="small">Use drip trays when filling; dispose of caps/seals responsibly.</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c6.q2" data-flow="existing" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="field-label">Planning</div>
+              <div class="small">Develop, maintain, and use an effective written IPM plan during 2026/27.</div>
+              <div class="input-row" style="margin-top:8px">
+                <select data-synthetic="c6.q3" data-flow="existing" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex" style="justify-content:flex-end;margin-top:14px">
+            <button class="btn" id="synth-next" type="button" aria-disabled="true" disabled>Next</button>
+          </div>
+          <div class="small status-msg" id="synth-status"></div>
+        </div>
+
+        <div class="card locked" id="sec-x">
+          <div class="section-title">Section 4</div>
           <h2>Enter your MRV criteria values</h2>
-          <div class="small">You do not need to enter any other data. Enter Criteria 1-7 from your MRV results, then submit to see eligible measures. We will save these to our Google Sheet so we can cross-check them.</div>
+          <div class="small">You do not need to enter any other data. Enter Criteria 1–4 and 7 from your MRV results, then submit to see eligible measures. We will save these to our Google Sheet so we can cross-check them.</div>
 
           <div class="grid" style="margin-top:10px" id="criteria-existing"></div>
 

@@ -12,6 +12,7 @@
       --alert:#ed5426;    /* Alert */
 
       --badge-entry:#ed5426;
+      --badge-below-entry:#b6421c;
       --badge-engaged:#dea600;
       --badge-advanced:#16ae69;
       --badge-leading:#5ab8b4;
@@ -149,6 +150,7 @@
 
     .badge{display:inline-flex;gap:8px;align-items:center;padding:5px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:12px}
     .badge .dot{width:8px;height:8px;border-radius:50%}
+    .badge.below_entry .dot{background:var(--badge-below-entry)}
     .badge.entry .dot{background:var(--badge-entry)}
     .badge.engaged .dot{background:var(--badge-engaged)}
     .badge.advanced .dot{background:var(--badge-advanced)}
