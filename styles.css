@@ -83,6 +83,8 @@
     .small{font-size:12px;color:var(--muted);line-height:1.45}
 
     .field-label{font-size:13px;font-weight:800;color:var(--text)}
+    .field-link{font-size:12px;font-weight:700;margin-left:8px;color:var(--forest);text-decoration:none}
+    .field-link:hover{ text-decoration:underline}
 
     .flex{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
     .grow{flex:1}
@@ -101,19 +103,7 @@
 
     input:focus, select:focus, textarea:focus{border-color:rgba(22,174,105,.55); box-shadow:0 0 0 4px rgba(183,240,126,.45)}
 
-    /* Missing-field glow */
-    .missing{
-      border-color:rgba(237,84,38,.75) !important;
-      box-shadow:0 0 0 4px rgba(237,84,38,.18) !important;
-      animation:missingPulse 1.2s ease-in-out infinite;
-    }
-    @keyframes missingPulse{0%,100%{transform:none}50%{transform:translateY(-1px)}}
-
-    .missing-block{
-      border:1px solid rgba(237,84,38,.55) !important;
-      box-shadow:0 0 0 4px rgba(237,84,38,.12) !important;
-      border-radius:14px;
-    }
+    /* Missing-field highlighting removed */
 
     .input-row{display:flex;gap:10px;align-items:center;margin-top:10px}
     .input-row span{color:var(--muted);white-space:nowrap}
@@ -327,7 +317,6 @@ body.modal-open{overflow:hidden}
 }
 
 @media (prefers-reduced-motion: reduce){
-  .missing{animation:none}
   .btn:active{transform:none}
   details.accordion .chev{transition:none}
 }

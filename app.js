@@ -123,8 +123,14 @@ const app = {
   submitDirty: { new:false, trade2025:false },
   done: new Set(),
   warn: new Set(),
+  validation: {
+    rotations: { hasComplete:false, hasPartial:false },
+    infrastructure: { hasComplete:false, hasPartial:false },
+    crops: { hasComplete:false, hasPartial:false }
+  },
   data: {
     applicant: { name:'', business:'', email:'', type:'', region:'', supply_aggregator:'' },
+    water: { anglian:null, affinity:null },
     baseline: {
       agricultural_ha:null,
       arable_ha:null,
@@ -188,20 +194,6 @@ function resetSubmitState_(){
 }
 
 // ===============================
-// Missing highlight helpers
-// ===============================
-function setMissing(el, on){
-  if(!el) return;
-  el.classList.toggle('missing', !!on);
-}
-
-function clearMissingWithin(root){
-  if(!root) return;
-  root.querySelectorAll('.missing').forEach(x=> x.classList.remove('missing'));
-  root.querySelectorAll('.missing-block').forEach(x=> x.classList.remove('missing-block'));
-}
-
-// ===============================
 // Measures config (fetch first, fallback JSONP)
 // ===============================
 function setModalStatus_(msg){
@@ -229,6 +221,21 @@ function isBoolTrue(v){
   if(v === false) return false;
   const s = String(v ?? '').trim().toLowerCase();
   return s === 'true' || s === 'yes' || s === '1';
+}
+
+function yesNoToBool(v){
+  if(v === true) return true;
+  if(v === false) return false;
+  const s = String(v ?? '').trim().toLowerCase();
+  if(s === 'yes' || s === 'true' || s === '1') return true;
+  if(s === 'no' || s === 'false' || s === '0') return false;
+  return null;
+}
+
+function boolToYesNo(v){
+  if(v === true) return 'yes';
+  if(v === false) return 'no';
+  return '';
 }
 
 function normalizeGroup_(g){
@@ -303,12 +310,18 @@ function cfgFromSheetMeasures(sheetMeasures){
       frontier_yks: isBoolTrue(m.frontier_yks)
     };
 
+    const waterFlags = {
+      anglian: isBoolTrue(m.anglian),
+      affinity: isBoolTrue(m.affinity)
+    };
+
     cfg[code] = {
       active: isBoolTrue(m.active),
       group: normalizeGroup_(rawGroup),
       category: String(rawCat ?? '').trim(),
       criteria,
-      aggregatorFlags
+      aggregatorFlags,
+      waterFlags
     };
   }
 
@@ -403,7 +416,8 @@ function allActiveMeasuresForLists_(){
       category: c.category,
       contributes_to: Array.from({length:7},(_,i)=>i+1).filter(i=> !!(c.criteria && c.criteria[i])),
       criteriaFlags: c.criteria || {},
-      aggregatorFlags: c.aggregatorFlags || {}
+      aggregatorFlags: c.aggregatorFlags || {},
+      waterFlags: c.waterFlags || {}
     });
   }
   out.sort((a,b)=> a.code.localeCompare(b.code));
@@ -652,14 +666,15 @@ function markDone(stepKey){ app.done.add(stepKey); }
 
 function setStepper(active){
   const steps = [
-    {key:'s1', label:'1. Identification'},
+    {key:'s1', label:'Identification'},
+    ...(app.flow ? [{key:'s2w', label:'Water eligibility'}] : []),
     ...(app.flow === 'new' ? [
-      {key:'s2', label:'2. Baseline'},
-      {key:'s3', label:'3. Rotations'},
-      {key:'s4', label:'4. Nature infra'},
-      {key:'s5', label:'5. Criteria'},
-      {key:'s6', label:'6. Crops'},
-      {key:'s7', label:'7. Review'}
+      {key:'s2', label:'Baseline'},
+      {key:'s3', label:'Rotations'},
+      {key:'s4', label:'Nature infra'},
+      {key:'s5', label:'Criteria'},
+      {key:'s6', label:'Crops'},
+      {key:'s7', label:'Review'}
     ] : []),
     ...(app.flow === 'trade2025' ? [{key:'mrv', label:'MRV criteria'}] : []),
   ];
@@ -676,38 +691,37 @@ function setStepper(active){
 }
 
 function updateStepperStatusesNew_(showMissing){
+  const waterOk = validateWaterSection(showMissing).ok;
   const baselineReq = ['s2-agri','s2-arable','s2-perm-crop','s2-pasture','s2-habitat','s2-livestock','s2-fuel'];
   const baselineMissing = baselineReq.filter(id => {
     const el = document.getElementById(id);
     return !el || String(el.value||'').trim()==='';
   });
 
-  if(showMissing){
-    baselineReq.forEach(id=> setMissing(document.getElementById(id), baselineMissing.includes(id)));
-  }
-
   const arable = app.data.baseline.arable_ha;
   const rotTotal = app.data.rotations.reduce((s,r)=> s + (r.area_ha || 0), 0);
-  const rotHasOne = app.data.rotations.length > 0;
+  const rotHasOne = app.validation.rotations?.hasComplete || app.data.rotations.length > 0;
+  const rotHasPartial = !!app.validation.rotations?.hasPartial;
   const rotTooMuch = (arable!=null && arable>0 && rotTotal > arable + 1e-9);
-  if(showMissing && (!rotHasOne || rotTooMuch)) document.getElementById('rot-block')?.classList.add('missing-block');
-
   const meta = infraMeta();
-  const infraOk = meta.agriM2 != null;
-  if(showMissing && !infraOk) document.getElementById('infra-block')?.classList.add('missing-block');
+  const infraHasOne = app.validation.infrastructure?.hasComplete || app.data.infrastructure.length > 0;
+  const infraHasPartial = !!app.validation.infrastructure?.hasPartial;
+  const infraOk = meta.agriM2 != null && infraHasOne && !infraHasPartial;
 
   const c = computeCriteriaForNew();
   const requiredCrit = [1,2,3,4,7];
   const critMissing = requiredCrit.filter(k => c[k] == null);
   if(showMissing) validateCriteriaSection(true);
 
-  const cropsOk = app.data.crops.length > 0;
-  if(showMissing && !cropsOk) document.getElementById('crops-block')?.classList.add('missing-block');
+  const cropsHasOne = app.validation.crops?.hasComplete || app.data.crops.length > 0;
+  const cropsHasPartial = !!app.validation.crops?.hasPartial;
+  const cropsOk = cropsHasOne && !cropsHasPartial;
 
   const statuses = {
     s1: validateSection1(false).ok,
+    s2w: waterOk,
     s2: baselineMissing.length === 0,
-    s3: rotHasOne && !rotTooMuch,
+    s3: rotHasOne && !rotHasPartial && !rotTooMuch,
     s4: infraOk,
     s5: critMissing.length === 0,
     s6: cropsOk,
@@ -727,6 +741,7 @@ function updateStepperStatusesNew_(showMissing){
 
 function updateStepperStatusesExisting_(showMissing){
   const s1ok = validateSection1(false).ok;
+  const waterOk = validateWaterSection(showMissing).ok;
   if(showMissing) validateExisting(true);
 
   const required = [1,2,3,4,7];
@@ -735,16 +750,17 @@ function updateStepperStatusesExisting_(showMissing){
 
   app.warn = new Set();
   if(s1ok) app.done.add('s1'); else { app.done.delete('s1'); app.warn.add('s1'); }
+  if(waterOk) app.done.add('s2w'); else { app.done.delete('s2w'); app.warn.add('s2w'); }
   if(mrvOk) app.done.add('mrv'); else { app.done.delete('mrv'); app.warn.add('mrv'); }
 
   setStepper('mrv');
-  return { s1: s1ok, mrv: mrvOk };
+  return { s1: s1ok, s2w: waterOk, mrv: mrvOk };
 }
 
 function markAllDoneForFlow_(){
   app.warn = new Set();
-  if(app.flow === 'new') ['s1','s2','s3','s4','s5','s6','s7'].forEach(k=> app.done.add(k));
-  if(app.flow === 'trade2025') ['s1','mrv'].forEach(k=> app.done.add(k));
+  if(app.flow === 'new') ['s1','s2w','s2','s3','s4','s5','s6','s7'].forEach(k=> app.done.add(k));
+  if(app.flow === 'trade2025') ['s1','s2w','mrv'].forEach(k=> app.done.add(k));
 }
 
 // ===============================
@@ -1028,23 +1044,46 @@ function overallFromLevels(levels){
 // ===============================
 // Measures selection
 // ===============================
+function waterOverrideEligible_(measure){
+  const water = app.data.water || {};
+  const inAnglian = water.anglian === true;
+  const inAffinity = water.affinity === true;
+  if(!inAnglian && !inAffinity) return false;
+  const flags = measure?.waterFlags || {};
+  return (inAnglian && isBoolTrue(flags.anglian)) || (inAffinity && isBoolTrue(flags.affinity));
+}
+
 function selectEligibleMeasures(criteriaValues){
   const levels = criteriaLevelsFromValues(criteriaValues);
   const overall = overallFromLevels(levels);
 
   // Eligible measures
   let eligible = [];
+  const baseCandidates = measuresForEligibility_();
+  const allActive = effectiveMeasures();
+  const waterEligible = allActive.filter(m=> waterOverrideEligible_(m));
   if(overall === 'advanced' || overall === 'leading'){
     eligible = [renderResiliencePayment()];
   } else {
-    const all = measuresForEligibility_();
-    eligible = suggestedMeasures(all, levels);
+    eligible = suggestedMeasures(baseCandidates, levels);
+  }
+  if(waterEligible.length){
+    const seen = new Set(eligible.map(m=>m.code));
+    for(const m of waterEligible){
+      if(!seen.has(m.code)){
+        eligible.push(m);
+        seen.add(m.code);
+      }
+    }
   }
 
   // Ineligible measures = all active measures not in eligible
   const eligibleCodes = new Set(eligible.map(m=>m.code));
-  const allActive = measuresForEligibility_();
-  const ineligible = allActive.filter(m=> !eligibleCodes.has(m.code));
+  const candidateMap = new Map();
+  for(const m of baseCandidates) candidateMap.set(m.code, m);
+  for(const m of waterEligible) candidateMap.set(m.code, m);
+  const allCandidates = Array.from(candidateMap.values());
+  const ineligible = allCandidates.filter(m=> !eligibleCodes.has(m.code));
 
   return { overall, levels, measures: eligible, ineligible };
 }
@@ -1125,22 +1164,41 @@ function bindRotations(){
   const addBtn = document.getElementById('rot-add');
   const summary = document.getElementById('rot-summary');
   const status = document.getElementById('s3-status');
-  const rotBlock = document.getElementById('rot-block');
 
   function syncFromDom(){
     const rows = [...tbody.querySelectorAll('tr')];
     const data = [];
+    let hasComplete = false;
+    let hasPartial = false;
     for(const tr of rows){
-      const name = tr.querySelector('[data-k="name"]').value.trim();
-      const numCrops = Number(tr.querySelector('[data-k="num_crops"]').value || 0);
-      const areaHa = Number(tr.querySelector('[data-k="area_ha"]').value || 0);
-      data.push({ id: tr.dataset.id, name, num_crops: Number.isFinite(numCrops)?numCrops:null, area_ha: Number.isFinite(areaHa)?areaHa:null });
+      const nameEl = tr.querySelector('[data-k="name"]');
+      const numEl = tr.querySelector('[data-k="num_crops"]');
+      const areaEl = tr.querySelector('[data-k="area_ha"]');
+
+      const name = (nameEl.value || '').trim();
+      const numRaw = (numEl.value || '').trim();
+      const areaRaw = (areaEl.value || '').trim();
+      const numVal = numRaw === '' ? null : Number(numRaw);
+      const areaVal = areaRaw === '' ? null : Number(areaRaw);
+      const numCrops = Number.isFinite(numVal) ? numVal : null;
+      const areaHa = Number.isFinite(areaVal) ? areaVal : null;
+
+      const any = !!name || numRaw !== '' || areaRaw !== '';
+      const complete = !!name && numCrops != null && areaHa != null;
+      if(any && !complete) hasPartial = true;
+      if(complete){
+        hasComplete = true;
+        data.push({ id: tr.dataset.id, name, num_crops: numCrops, area_ha: areaHa });
+      }
+
     }
     app.data.rotations = data;
+    app.validation.rotations = { hasComplete, hasPartial };
+    return { hasComplete, hasPartial };
   }
 
   function recalc(){
-    syncFromDom();
+    const { hasComplete, hasPartial } = syncFromDom();
 
     const arable = app.data.baseline.arable_ha;
     const total = app.data.rotations.reduce((s,r)=> s + (r.area_ha || 0), 0);
@@ -1155,9 +1213,17 @@ function bindRotations(){
         status.textContent = 'Total rotation surface area must not exceed arable cropland area.';
         status.classList.remove('warn');
         status.classList.add('err');
+      } else if(!hasComplete){
+        status.textContent = 'Please add at least one completed rotation.';
+        status.classList.remove('err');
+        status.classList.add('warn');
+      } else if(hasPartial){
+        status.textContent = 'Please complete all rotation rows (name, # crops, area).';
+        status.classList.remove('err');
+        status.classList.add('warn');
       } else {
         status.textContent = '';
-        status.classList.remove('err');
+        status.classList.remove('err','warn');
       }
     }
 
@@ -1165,17 +1231,13 @@ function bindRotations(){
     setCriterionValue('new', 1, c1);
 
     const next = document.getElementById('s3-next');
-    const hasOne = app.data.rotations.length > 0;
-    const ok = hasOne && !tooMuch;
+    const ok = hasComplete && !hasPartial && !tooMuch;
     next.classList.toggle('disabled', !ok);
     setAriaDisabled_(next, !ok);
 
-    if(rotBlock){
-      rotBlock.classList.toggle('missing-block', !hasOne);
-    }
-
     validateCriteriaSection(false);
     updateReview();
+    updateSubmitNewState();
   }
 
   if(tbody && tbody.children.length === 0) tbody.insertAdjacentHTML('beforeend', rotRowTemplate(uid('rot')));
@@ -1221,30 +1283,48 @@ function bindInfrastructure(){
   function syncFromDom(){
     const rows = [...tbody.querySelectorAll('tr')];
     const data = [];
+    let hasComplete = false;
+    let hasPartial = false;
     for(const tr of rows){
-      const type = tr.querySelector('[data-k="type"]').value;
-      const qty = Number(tr.querySelector('[data-k="qty"]').value || 0);
+      const typeEl = tr.querySelector('[data-k="type"]');
+      const qtyEl = tr.querySelector('[data-k="qty"]');
+
+      const type = typeEl.value;
+      const qtyRaw = (qtyEl.value || '').trim();
+      const qtyVal = qtyRaw === '' ? null : Number(qtyRaw);
+      const qty = Number.isFinite(qtyVal) ? qtyVal : null;
+
+      const any = !!type || qtyRaw !== '';
+      const complete = !!type && qty != null;
+      if(any && !complete) hasPartial = true;
+      if(complete) hasComplete = true;
+
       const info = lookup(type);
       const unit = info ? info.unit : null;
       const impact = info ? info.impact : null;
-      const impactM2 = (info && Number.isFinite(qty)) ? qty * info.impact : null;
+      const impactM2 = (info && qty != null) ? qty * info.impact : null;
 
-      data.push({ id: tr.dataset.id, type, qty: Number.isFinite(qty)?qty:null, unit, impact, impact_m2: impactM2 });
+      if(complete){
+        data.push({ id: tr.dataset.id, type, qty, unit, impact, impact_m2: impactM2 });
+      }
 
       tr.querySelector('[data-k="unit"]').textContent = unit ?? '—';
       tr.querySelector('[data-k="impact"]').textContent = impact ?? '—';
       tr.querySelector('[data-k="impact_m2"]').textContent = (impactM2==null ? '—' : Math.round(impactM2*100)/100);
+
     }
     app.data.infrastructure = data;
+    app.validation.infrastructure = { hasComplete, hasPartial };
+    return { hasComplete, hasPartial };
   }
 
   function recalc(){
-    syncFromDom();
+    const { hasComplete, hasPartial } = syncFromDom();
 
     const meta = infraMeta();
     if(summary){
       if(meta.agriM2 == null){
-        summary.textContent = 'Enter Agricultural area in Section 2 to calculate % impacted.';
+        summary.textContent = 'Enter Agricultural area in Section 3 to calculate % impacted.';
       } else {
         summary.textContent = `Total impacted: ${Math.round(meta.totalImpactM2*100)/100} m² • Agricultural area: ${Math.round(meta.agriM2)} m² • % impacted: ${meta.pct ?? '—'}%`;
       }
@@ -1252,23 +1332,33 @@ function bindInfrastructure(){
 
     if(status){
       if(meta.agriM2 == null){
-        status.textContent = 'Please complete Agricultural area in Section 2.';
+        status.textContent = 'Please complete Agricultural area in Section 3.';
         status.classList.add('warn');
+        status.classList.remove('err');
+      } else if(!hasComplete){
+        status.textContent = 'Please add at least one completed nature infrastructure row.';
+        status.classList.add('warn');
+        status.classList.remove('err');
+      } else if(hasPartial){
+        status.textContent = 'Please complete all nature infrastructure rows (type, quantity).';
+        status.classList.add('warn');
+        status.classList.remove('err');
       } else {
         status.textContent = '';
-        status.classList.remove('warn');
+        status.classList.remove('warn','err');
       }
     }
 
     setCriterionValue('new', 7, meta.pct);
 
     const next = document.getElementById('s4-next');
-    const ok = meta.agriM2 != null;
+    const ok = meta.agriM2 != null && hasComplete && !hasPartial;
     next.classList.toggle('disabled', !ok);
     setAriaDisabled_(next, !ok);
 
     validateCriteriaSection(false);
     updateReview();
+    updateSubmitNewState();
   }
 
   if(tbody && tbody.children.length === 0) tbody.insertAdjacentHTML('beforeend', infraRowTemplate(uid('infra')));
@@ -1309,44 +1399,82 @@ function bindCrops(){
   const tbody = document.querySelector('#crops-table tbody');
   const addBtn = document.getElementById('crops-add');
   const summary = document.getElementById('crops-summary');
-  const cropsBlock = document.getElementById('crops-block');
+  const status = document.getElementById('s6-status');
 
   function syncFromDom(){
     const rows = [...tbody.querySelectorAll('tr')];
     const data = [];
+    let hasComplete = false;
+    let hasPartial = false;
     for(const tr of rows){
-      const crop = (tr.querySelector('[data-k="crop"]').value || '').trim();
-      const areaHa = Number(tr.querySelector('[data-k="area_ha"]').value || 0);
-      const n = Number(tr.querySelector('[data-k="n_kg_ha"]').value || 0);
-      const on = Number(tr.querySelector('[data-k="org_n_kg_ha"]').value || 0);
-      const y = Number(tr.querySelector('[data-k="yield_t_ha"]').value || 0);
+      const cropEl = tr.querySelector('[data-k="crop"]');
+      const areaEl = tr.querySelector('[data-k="area_ha"]');
+      const nEl = tr.querySelector('[data-k="n_kg_ha"]');
+      const onEl = tr.querySelector('[data-k="org_n_kg_ha"]');
+      const yEl = tr.querySelector('[data-k="yield_t_ha"]');
 
-      data.push({
-        id: tr.dataset.id,
-        crop,
-        area_ha: Number.isFinite(areaHa)?areaHa:null,
-        n_kg_ha: Number.isFinite(n)?n:null,
-        org_n_kg_ha: Number.isFinite(on)?on:null,
-        yield_t_ha: Number.isFinite(y)?y:null
-      });
+      const crop = (cropEl.value || '').trim();
+      const areaRaw = (areaEl.value || '').trim();
+      const nRaw = (nEl.value || '').trim();
+      const onRaw = (onEl.value || '').trim();
+      const yRaw = (yEl.value || '').trim();
+
+      const areaVal = areaRaw === '' ? null : Number(areaRaw);
+      const nVal = nRaw === '' ? null : Number(nRaw);
+      const onVal = onRaw === '' ? null : Number(onRaw);
+      const yVal = yRaw === '' ? null : Number(yRaw);
+
+      const areaHa = Number.isFinite(areaVal) ? areaVal : null;
+      const n = Number.isFinite(nVal) ? nVal : null;
+      const on = Number.isFinite(onVal) ? onVal : null;
+      const y = Number.isFinite(yVal) ? yVal : null;
+
+      const any = !!crop || areaRaw !== '' || nRaw !== '' || onRaw !== '' || yRaw !== '';
+      const complete = !!crop && areaHa != null && n != null && on != null && y != null;
+      if(any && !complete) hasPartial = true;
+      if(complete){
+        hasComplete = true;
+        data.push({
+          id: tr.dataset.id,
+          crop,
+          area_ha: areaHa,
+          n_kg_ha: n,
+          org_n_kg_ha: on,
+          yield_t_ha: y
+        });
+      }
+
     }
     app.data.crops = data;
+    app.validation.crops = { hasComplete, hasPartial };
+    return { hasComplete, hasPartial };
   }
 
   function recalc(){
-    syncFromDom();
+    const { hasComplete, hasPartial } = syncFromDom();
     if(summary){
       const n = app.data.crops.length;
       summary.textContent = n ? `${n} crop${n===1?'':'s'} added` : 'No crops added yet.';
     }
 
     const next = document.getElementById('s6-next');
-    const ok = app.data.crops.length > 0;
+    const ok = hasComplete && !hasPartial;
     next.classList.toggle('disabled', !ok);
     setAriaDisabled_(next, !ok);
 
-    if(cropsBlock){
-      cropsBlock.classList.toggle('missing-block', !ok);
+    if(status){
+      if(!hasComplete){
+        status.textContent = 'Please add at least one completed crop row.';
+        status.classList.add('warn');
+        status.classList.remove('err');
+      } else if(hasPartial){
+        status.textContent = 'Please complete all crop rows (crop, area, N, organic N, yield).';
+        status.classList.add('warn');
+        status.classList.remove('err');
+      } else {
+        status.textContent = '';
+        status.classList.remove('warn','err');
+      }
     }
 
     updateReview();
@@ -1487,20 +1615,6 @@ function validateCriteriaSection(showMissing){
   const required = [1,2,3,4,7];
   const missing = required.filter(k => values[k] == null);
 
-  // Clear/mark missing fields
-  if(showMissing){
-    for(const k of required){
-      const el = document.getElementById(`crit-new-${k}`);
-      if(!el) continue;
-      // skip calculated
-      if(k===1 || k===7) continue;
-      setMissing(el, values[k] == null);
-    }
-  } else {
-    // clear missing styling while typing
-    for(const k of [2,3,4]) setMissing(document.getElementById(`crit-new-${k}`), false);
-  }
-
   for(const c of CRITERIA){
     const v = values[c.id];
     if(v==null) { setBadge('new', c.id, null); continue; }
@@ -1532,18 +1646,10 @@ function validateCriteriaSection(showMissing){
 function validateExisting(showMissing){
   const required = [1,2,3,4,7];
   const missing = required.filter(i => app.data.mrvCriteria['C'+i] == null);
-
-  if(showMissing){
-    for(const i of required){
-      const el = document.getElementById(`crit-existing-${i}`);
-      setMissing(el, app.data.mrvCriteria['C'+i] == null);
-    }
-  } else {
-    required.forEach(i=> setMissing(document.getElementById(`crit-existing-${i}`), false));
-  }
+  const waterOk = app.data.water && app.data.water.anglian != null && app.data.water.affinity != null;
 
   const btn = document.getElementById('submit-existing');
-  const ok = missing.length === 0;
+  const ok = missing.length === 0 && waterOk;
   btn.classList.toggle('disabled', !ok);
   setAriaDisabled_(btn, !ok);
   if(ok && app.submitState.trade2025 !== 'loading') syncSubmitState_('trade2025');
@@ -1553,6 +1659,10 @@ function validateExisting(showMissing){
     if(ok){
       status.textContent = '';
       status.classList.remove('err','warn');
+    } else if(!waterOk){
+      status.textContent = 'Please complete Water catchment eligibility (Section 2).';
+      status.classList.remove('err');
+      status.classList.add('warn');
     } else {
       status.textContent = `Please enter: ${missing.map(i=>`C${i}`).join(', ')}`;
       status.classList.remove('err');
@@ -1593,17 +1703,6 @@ function validateSection1(showMissing){
   btn.classList.toggle('disabled', !ok);
   setAriaDisabled_(btn, !ok);
 
-  if(showMissing){
-    setMissing(nameEl, !name);
-    setMissing(businessEl, !business);
-    setMissing(emailEl, !email || !email.includes('@'));
-    setMissing(typeEl, !type);
-    setMissing(regionEl, !region);
-    setMissing(aggregatorEl, !supply_aggregator);
-  } else {
-    [nameEl,businessEl,emailEl,typeEl,regionEl,aggregatorEl].forEach(el=> setMissing(el,false));
-  }
-
   const status = document.getElementById('s1-status');
   if(status){
     if(ok){
@@ -1621,6 +1720,46 @@ function validateSection1(showMissing){
   }
 
   return { ok, name, business, email, type, region, supply_aggregator };
+}
+
+function validateWaterSection(showMissing){
+  const anglianEl = document.getElementById('s2-anglian');
+  const affinityEl = document.getElementById('s2-affinity');
+  const anglian = yesNoToBool(anglianEl?.value);
+  const affinity = yesNoToBool(affinityEl?.value);
+
+  const missing = [];
+  if(anglian == null) missing.push('Anglian Water catchment');
+  if(affinity == null) missing.push('Affinity Water catchment');
+
+  const ok = missing.length === 0;
+
+  const btn = document.getElementById('s2w-next');
+  if(btn){
+    btn.classList.toggle('disabled', !ok);
+    setAriaDisabled_(btn, !ok);
+  }
+
+  const status = document.getElementById('s2w-status');
+  if(status){
+    if(ok){
+      status.textContent = '';
+      status.classList.remove('err','warn');
+    } else if(showMissing){
+      status.textContent = `Please complete: ${missing.join(', ')}`;
+      status.classList.remove('err');
+      status.classList.add('warn');
+    } else {
+      status.textContent = '';
+      status.classList.remove('err','warn');
+    }
+  }
+
+  if(app.data){
+    app.data.water = { anglian, affinity };
+  }
+
+  return { ok, anglian, affinity };
 }
 
 function bindSection1(){
@@ -1687,23 +1826,66 @@ function bindSection1(){
     markDone('s1');
 
     if(app.flow === 'new'){
+      document.getElementById('sec-2')?.classList.remove('hide');
       document.getElementById('new-flow').classList.remove('hide');
       document.getElementById('existing-flow').classList.add('hide');
       initLocksForFlow_();
-      setStepper('s2');
+      setStepper('s2w');
       scrollToId('sec-2');
     } else {
+      document.getElementById('sec-2')?.classList.remove('hide');
       document.getElementById('existing-flow').classList.remove('hide');
       document.getElementById('new-flow').classList.add('hide');
       initLocksForFlow_();
-      setStepper('mrv');
-      scrollToId('sec-x');
+      setStepper('s2w');
+      scrollToId('sec-2');
     }
 
     saveViewState_({ flow: app.flow });
   });
 
   validateSection1(false);
+}
+
+function bindWaterSection(){
+  function markWaterDirty_(){
+    if(app.flow === 'new') markSubmitDirty_('new');
+    if(app.flow === 'trade2025') markSubmitDirty_('trade2025');
+  }
+
+  ['s2-anglian','s2-affinity'].forEach(id=>{
+    document.getElementById(id)?.addEventListener('change', ()=>{
+      validateWaterSection(false);
+      updateReview();
+      if(app.flow === 'new') updateSubmitNewState();
+      if(app.flow === 'trade2025') validateExisting(false);
+      markWaterDirty_();
+    });
+    document.getElementById(id)?.addEventListener('input', ()=>{
+      validateWaterSection(false);
+      updateReview();
+      if(app.flow === 'new') updateSubmitNewState();
+      if(app.flow === 'trade2025') validateExisting(false);
+      markWaterDirty_();
+    });
+  });
+
+  document.getElementById('s2w-next')?.addEventListener('click', ()=>{
+    const v = validateWaterSection(true);
+    if(!v.ok) return;
+    markDone('s2w');
+    if(app.flow === 'new'){
+      setLocked('sec-3', false);
+      setStepper('s2');
+      scrollToId('sec-3');
+    } else if(app.flow === 'trade2025'){
+      setLocked('sec-x', false);
+      setStepper('mrv');
+      scrollToId('sec-x');
+    }
+  });
+
+  validateWaterSection(false);
 }
 
 function bindBaseline(){
@@ -1732,13 +1914,6 @@ function bindBaseline(){
     const ok = missing.length === 0;
     next.classList.toggle('disabled', !ok);
     setAriaDisabled_(next, !ok);
-
-    if(showMissing){
-      ids.forEach(id=> setMissing(document.getElementById(id), false));
-      missing.forEach(m=> setMissing(document.getElementById(m.id), true));
-    } else {
-      ids.forEach(id=> setMissing(document.getElementById(id), false));
-    }
 
     if(status){
       if(ok){
@@ -1773,9 +1948,9 @@ function bindBaseline(){
     sync(true);
     if(next.getAttribute('aria-disabled') === 'true') return;
     markDone('s2');
-    setLocked('sec-3', false);
+    setLocked('sec-4', false);
     setStepper('s3');
-    scrollToId('sec-3');
+    scrollToId('sec-4');
   });
 
   sync(false);
@@ -1799,10 +1974,11 @@ function setLocked(id, locked){
 function initLocksForFlow_(){
   if(app.flow === 'new'){
     setLocked('sec-2', false);
-    ['sec-3','sec-4','sec-5','sec-6','sec-7','sec-out-new'].forEach(id=> setLocked(id, true));
+    ['sec-3','sec-4','sec-5','sec-6','sec-7','sec-8','sec-out-new'].forEach(id=> setLocked(id, true));
   }
   if(app.flow === 'trade2025'){
-    setLocked('sec-x', false);
+    setLocked('sec-2', false);
+    setLocked('sec-x', true);
     setLocked('sec-out-existing', true);
   }
 }
@@ -1811,15 +1987,17 @@ function applyLocksFromProgress_(){
   initLocksForFlow_();
 
   if(app.flow === 'new'){
-    if(app.done.has('s2')) setLocked('sec-3', false);
-    if(app.done.has('s3')) setLocked('sec-4', false);
-    if(app.done.has('s4')) setLocked('sec-5', false);
-    if(app.done.has('s5')) setLocked('sec-6', false);
-    if(app.done.has('s6')) setLocked('sec-7', false);
+    if(app.done.has('s2w')) setLocked('sec-3', false);
+    if(app.done.has('s2')) setLocked('sec-4', false);
+    if(app.done.has('s3')) setLocked('sec-5', false);
+    if(app.done.has('s4')) setLocked('sec-6', false);
+    if(app.done.has('s5')) setLocked('sec-7', false);
+    if(app.done.has('s6')) setLocked('sec-8', false);
     if(app.submitted) setLocked('sec-out-new', false);
   }
 
   if(app.flow === 'trade2025'){
+    if(app.done.has('s2w')) setLocked('sec-x', false);
     if(app.submitted) setLocked('sec-out-existing', false);
   }
 }
@@ -1827,41 +2005,41 @@ function applyLocksFromProgress_(){
 function bindNewNav(){
   document.getElementById('s3-next')?.addEventListener('click', ()=>{
     if(document.getElementById('s3-next').getAttribute('aria-disabled') === 'true'){
-      document.getElementById('rot-block')?.classList.add('missing-block');
       return;
     }
     markDone('s3');
-    setLocked('sec-4', false);
+    setLocked('sec-5', false);
     setStepper('s4');
-    scrollToId('sec-4');
+    scrollToId('sec-5');
   });
 
   document.getElementById('s4-next')?.addEventListener('click', ()=>{
-    if(document.getElementById('s4-next').getAttribute('aria-disabled') === 'true') return;
+    if(document.getElementById('s4-next').getAttribute('aria-disabled') === 'true'){
+      return;
+    }
     markDone('s4');
-    setLocked('sec-5', false);
+    setLocked('sec-6', false);
     setStepper('s5');
-    scrollToId('sec-5');
+    scrollToId('sec-6');
   });
 
   document.getElementById('s5-next')?.addEventListener('click', ()=>{
     validateCriteriaSection(true);
     if(document.getElementById('s5-next').getAttribute('aria-disabled') === 'true') return;
     markDone('s5');
-    setLocked('sec-6', false);
+    setLocked('sec-7', false);
     setStepper('s6');
-    scrollToId('sec-6');
+    scrollToId('sec-7');
   });
 
   document.getElementById('s6-next')?.addEventListener('click', ()=>{
     if(document.getElementById('s6-next').getAttribute('aria-disabled') === 'true'){
-      document.getElementById('crops-block')?.classList.add('missing-block');
       return;
     }
     markDone('s6');
-    setLocked('sec-7', false);
+    setLocked('sec-8', false);
     setStepper('s7');
-    scrollToId('sec-7');
+    scrollToId('sec-8');
     updateReview();
     updateSubmitNewState();
   });
@@ -1874,9 +2052,11 @@ function updateReview(){
   if(!el) return;
 
   const b = app.data.baseline;
+  const w = app.data.water || {};
   const meta = infraMeta();
   const criteria = computeCriteriaForNew();
   const { levels, overall } = selectEligibleMeasures(criteria);
+  const waterLabel = (v)=> (v == null ? '—' : (v ? 'Yes' : 'No'));
 
   el.innerHTML = `
     <div class="grid">
@@ -1885,6 +2065,7 @@ function updateReview(){
           <div><strong>${escapeHtml(app.data.applicant.name)}</strong></div>
           <div class="small">${escapeHtml(app.data.applicant.business)} • ${escapeHtml(app.data.applicant.email)}</div>
           <div class="small">${escapeHtml(regionLabel_(app.data.applicant.region))} • ${escapeHtml(aggregatorLabel_(app.data.applicant.supply_aggregator))}</div>
+          <div class="small">Anglian Water catchment: <strong>${waterLabel(w.anglian)}</strong> • Affinity Water catchment: <strong>${waterLabel(w.affinity)}</strong></div>
         </div>
       <div class="card" style="box-shadow:none">
         <div class="section-title">Baseline</div>
@@ -1921,7 +2102,11 @@ function updateSubmitNewState(){
   const required = [1,2,3,4,7];
   const missing = required.filter(k => c[k] == null);
 
-  const ok = missing.length === 0 && (app.data.crops.length > 0) && (app.data.rotations.length > 0);
+  const rotOk = app.validation.rotations?.hasComplete && !app.validation.rotations?.hasPartial;
+  const infraOk = app.validation.infrastructure?.hasComplete && !app.validation.infrastructure?.hasPartial && infraMeta().agriM2 != null;
+  const cropsOk = app.validation.crops?.hasComplete && !app.validation.crops?.hasPartial;
+  const waterOk = app.data.water && app.data.water.anglian != null && app.data.water.affinity != null;
+  const ok = missing.length === 0 && rotOk && infraOk && cropsOk && waterOk;
   btn.classList.toggle('disabled', !ok);
   setAriaDisabled_(btn, !ok);
   if(ok) syncSubmitState_('new');
@@ -1969,6 +2154,7 @@ function buildSubmissionPayload(flow, criteriaValues, selection){
       app: 'Application Form 2026 POC',
       farm_type: flow,
       details: {
+        water_catchment: app.data.water,
         baseline: app.data.baseline,
         rotations: app.data.rotations,
         infrastructure: app.data.infrastructure,
@@ -2005,6 +2191,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
   const a = app.data.applicant;
   const b = app.data.baseline;
+  const w = app.data.water || {};
   const infra = infraMeta();
 
   const yesNo = (v)=> (v==null ? '—' : (Number(v)>=1 ? 'Yes' : 'No'));
@@ -2071,7 +2258,13 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Baseline (Section 2)</h3>
+      <h3 style="margin:0 0 8px">Water catchment eligibility (Section 2)</h3>
+      <div class="small">Anglian Water catchment: <strong>${yesNo(w.anglian)}</strong></div>
+      <div class="small">Affinity Water catchment: <strong>${yesNo(w.affinity)}</strong></div>
+
+      <div class="divider"></div>
+
+      <h3 style="margin:0 0 8px">Baseline (Section 3)</h3>
       <div class="small">Agricultural area: <strong>${fmt(b.agricultural_ha)}</strong> ha</div>
       <div class="small">Arable cropland: <strong>${fmt(b.arable_ha)}</strong> ha</div>
       <div class="small">Permanent cropland: <strong>${fmt(b.perm_cropland_ha)}</strong> ha</div>
@@ -2082,7 +2275,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Rotations (Section 3)</h3>
+      <h3 style="margin:0 0 8px">Rotations (Section 4)</h3>
       <table class="table">
         <thead><tr><th>Rotation</th><th># crops</th><th>Area (ha)</th></tr></thead>
         <tbody>${rotationsRows || `<tr><td colspan="3" class="small">None</td></tr>`}</tbody>
@@ -2090,7 +2283,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Nature infrastructure (Section 4)</h3>
+      <h3 style="margin:0 0 8px">Nature infrastructure (Section 5)</h3>
       <div class="small">Total impacted: <strong>${fmt(Math.round(infra.totalImpactM2*100)/100)}</strong> m² • % of agricultural area: <strong>${fmt(infra.pct, '%')}</strong></div>
       <table class="table">
         <thead><tr><th>Type</th><th>Qty</th><th>Unit</th><th>Impact factor</th><th>Impact area (m²)</th></tr></thead>
@@ -2099,7 +2292,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Criteria (Section 5)</h3>
+      <h3 style="margin:0 0 8px">Criteria (Section 6)</h3>
       <table class="table">
         <thead><tr><th>Criterion</th><th>What it measures</th><th>Your value</th><th>Level</th></tr></thead>
         <tbody>${critRows}</tbody>
@@ -2107,7 +2300,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Crops (Section 6)</h3>
+      <h3 style="margin:0 0 8px">Crops (Section 7)</h3>
       <table class="table">
         <thead><tr><th>Crop</th><th>Area (ha)</th><th>N (kg/ha)</th><th>Organic N (kg/ha)</th><th>Yield (t/ha)</th></tr></thead>
         <tbody>${cropsRows || `<tr><td colspan="5" class="small">None</td></tr>`}</tbody>
@@ -2138,6 +2331,7 @@ function printExistingFarm_(selection, criteriaValues, levels){
   if(!area) return;
 
   const a = app.data.applicant;
+  const w = app.data.water || {};
   const yesNo = (v)=> (v==null ? '—' : (Number(v)>=1 ? 'Yes' : 'No'));
   const fmt = (v, suf='')=> (v==null ? '—' : `${v}${suf}`);
 
@@ -2195,6 +2389,12 @@ function printExistingFarm_(selection, criteriaValues, levels){
         <div><strong>Region:</strong> ${escapeHtml(regionLabel_(a.region))}</div>
         <div><strong>Supply aggregator:</strong> ${escapeHtml(aggregatorLabel_(a.supply_aggregator))}</div>
         <div class="small" style="margin-top:6px">Farm type: <strong>Existing Trade 2025 farm</strong></div>
+
+      <div class="divider"></div>
+
+      <h3 style="margin:0 0 8px">Water catchment eligibility (Section 2)</h3>
+      <div class="small">Anglian Water catchment: <strong>${yesNo(w.anglian)}</strong></div>
+      <div class="small">Affinity Water catchment: <strong>${yesNo(w.affinity)}</strong></div>
 
       <div class="divider"></div>
 
@@ -2342,9 +2542,6 @@ function bindNewSubmit(){
 
     if(btn.getAttribute('aria-disabled') === 'true'){
       updateStepperStatusesNew_(true);
-
-      document.getElementById('crops-block')?.classList.toggle('missing-block', app.data.crops.length === 0);
-      document.getElementById('rot-block')?.classList.toggle('missing-block', app.data.rotations.length === 0);
       return;
     }
 
@@ -2423,7 +2620,6 @@ function clearAutosave_(){
 }
 
 function resetAll(){
-  clearMissingWithin(document.body);
   clearAutosave_();
   try{ localStorage.removeItem(LS_VIEW_KEY); } catch {}
 
@@ -2434,6 +2630,11 @@ function resetAll(){
     else el.value = '';
   });
   setAggregatorOptions_('');
+
+  ['s2-anglian','s2-affinity'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
 
   ['s2-agri','s2-arable','s2-perm-crop','s2-pasture','s2-habitat','s2-livestock','s2-fuel'].forEach(id=>{
     const el = document.getElementById(id); if(el) el.value='';
@@ -2451,12 +2652,19 @@ function resetAll(){
   resetSubmitState_();
   app.done = new Set();
   app.warn = new Set();
+  app.validation = {
+    rotations: { hasComplete:false, hasPartial:false },
+    infrastructure: { hasComplete:false, hasPartial:false },
+    crops: { hasComplete:false, hasPartial:false }
+  };
   app.data.applicant = { name:'', business:'', email:'', type:'', region:'', supply_aggregator:'' };
+  app.data.water = { anglian:null, affinity:null };
   app.data.baseline = { agricultural_ha:null, arable_ha:null, perm_cropland_ha:null, perm_pasture_ha:null, habitat_ha:null, livestock:null, fuel_lpy:null };
   app.data.rotations = [];
   app.data.infrastructure = [];
   app.data.crops = [];
 
+  document.getElementById('sec-2')?.classList.add('hide');
   document.getElementById('new-flow')?.classList.add('hide');
   document.getElementById('existing-flow')?.classList.add('hide');
 
@@ -2472,7 +2680,7 @@ function resetAll(){
   if(document.getElementById('measures-new-hint')) document.getElementById('measures-new-hint').textContent='Submit responses to see eligible measures.';
   if(document.getElementById('measures-existing-hint')) document.getElementById('measures-existing-hint').textContent='Enter your MRV criteria values and click submit to see eligible measures.';
 
-  ['s1-status','s2-status','s3-status','s4-status','s5-status','s6-status','submit-status','existing-status'].forEach(id=>{
+  ['s1-status','s2w-status','s2-status','s3-status','s4-status','s5-status','s6-status','submit-status','existing-status'].forEach(id=>{
     const el = document.getElementById(id); if(el){ el.textContent=''; el.classList.remove('err','warn'); }
   });
 
@@ -2492,6 +2700,7 @@ function resetAll(){
   bindCriteriaExisting();
 
   validateSection1(false);
+  validateWaterSection(false);
   setStepper('s1');
 }
 
@@ -2525,6 +2734,10 @@ function readDomAutosaveState_(){
         region: document.getElementById('s1-region')?.value || '',
         supply_aggregator: document.getElementById('s1-aggregator')?.value || ''
       },
+    water: {
+      anglian: yesNoToBool(document.getElementById('s2-anglian')?.value),
+      affinity: yesNoToBool(document.getElementById('s2-affinity')?.value)
+    },
     baseline: {
       agricultural_ha: numVal('s2-agri'),
       arable_ha: numVal('s2-arable'),
@@ -2619,6 +2832,13 @@ function restoreAutosaveToDom_(state){
     // set app flow from restored type
     if(a.type === 'new') app.flow = 'new';
     else if(a.type === 'trade2025') app.flow = 'trade2025';
+  }
+
+  if(state.water){
+    const w = state.water;
+    if(document.getElementById('s2-anglian')) document.getElementById('s2-anglian').value = boolToYesNo(w.anglian);
+    if(document.getElementById('s2-affinity')) document.getElementById('s2-affinity').value = boolToYesNo(w.affinity);
+    app.data.water = { anglian: yesNoToBool(w.anglian), affinity: yesNoToBool(w.affinity) };
   }
 
   // Baseline
@@ -2734,7 +2954,6 @@ function applyRestoredCriteriaToDom_(){
 function bindResets(){
   document.getElementById('reset-new')?.addEventListener('click', ()=> resetAll());
   document.getElementById('reset-existing')?.addEventListener('click', ()=>{
-    clearMissingWithin(document.getElementById('existing-flow'));
     app.data.mrvCriteria = {};
     app.submitted = false;
     app.submitDirty.trade2025 = false;
@@ -2757,6 +2976,7 @@ function bindResets(){
     try{
       console.assert(typeof LS_VIEW_KEY === 'string' && LS_VIEW_KEY.length > 0, 'LS_VIEW_KEY defined');
       console.assert(document.getElementById('sec-1'), 'Section 1 exists');
+      console.assert(document.getElementById('sec-2'), 'Section 2 exists');
       console.assert(document.getElementById('s1-continue'), 'Section 1 continue exists');
       console.assert(document.getElementById('s1-region'), 'Section 1 region exists');
       console.assert(document.getElementById('s1-aggregator'), 'Section 1 aggregator exists');
@@ -2798,12 +3018,15 @@ async function main(){
 
   bindMeasuresModal_();
   bindSection1();
+  bindWaterSection();
 
   // If a saved flow exists, show it immediately (no extra click)
   if(app.flow === 'new'){
+    document.getElementById('sec-2')?.classList.remove('hide');
     document.getElementById('new-flow')?.classList.remove('hide');
     document.getElementById('existing-flow')?.classList.add('hide');
   } else if(app.flow === 'trade2025'){
+    document.getElementById('sec-2')?.classList.remove('hide');
     document.getElementById('existing-flow')?.classList.remove('hide');
     document.getElementById('new-flow')?.classList.add('hide');
   }
@@ -2832,7 +3055,7 @@ async function main(){
 
   // If we restored a flow, compute current step & re-render outputs if previously submitted
   if(app.flow){
-    const activeKey = app.submitted ? (app.flow === 'new' ? 's7' : 'mrv') : (app.flow === 'new' ? 's2' : 'mrv');
+    const activeKey = app.submitted ? (app.flow === 'new' ? 's7' : 'mrv') : (app.flow === 'new' ? 's2w' : 's2w');
     setStepper(activeKey);
 
     if(app.submitted){
