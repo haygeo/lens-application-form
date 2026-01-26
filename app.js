@@ -2488,6 +2488,15 @@ function buildSubmissionPayload(flow, criteriaValues, selection){
         crops: app.data.crops,
         nature_infra_summary: infraMeta(),
         criteria_values: criteriaValues,
+        synthetic_inputs: (function(){
+          const out = { c5:{}, c6:{} };
+          for(const q of SYNTHETIC_QUESTIONS){
+            const [crit, key] = q.key.split('.');
+            if(!crit || !key) continue;
+            out[crit][key] = app.data.synthetic_inputs?.[crit]?.[key] ?? null;
+          }
+          return out;
+        })(),
         ineligible_measures: (selection.ineligible || []).map(m=>({ code:m.code, name:m.name, group:m.group, category:m.category }))
       }
     }
