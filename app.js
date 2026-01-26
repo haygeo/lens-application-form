@@ -321,6 +321,7 @@ function cfgFromSheetMeasures(sheetMeasures){
 
     cfg[code] = {
       active: isBoolTrue(m.active),
+      targeted: isBoolTrue(m.targeted),
       group: normalizeGroup_(rawGroup),
       category: String(rawCat ?? '').trim(),
       criteria,
@@ -421,7 +422,8 @@ function allActiveMeasuresForLists_(){
       contributes_to: Array.from({length:7},(_,i)=>i+1).filter(i=> !!(c.criteria && c.criteria[i])),
       criteriaFlags: c.criteria || {},
       aggregatorFlags: c.aggregatorFlags || {},
-      waterFlags: c.waterFlags || {}
+      waterFlags: c.waterFlags || {},
+      targeted: c.targeted
     });
   }
   out.sort((a,b)=> a.code.localeCompare(b.code));
@@ -1193,13 +1195,26 @@ function selectEligibleMeasures(criteriaValues){
 
   // Eligible measures
   let eligible = [];
+  const aggColumn = aggregatorColumnForSelection_(app.data.applicant.region, app.data.applicant.supply_aggregator);
   const baseCandidates = measuresForEligibility_();
+  const targetedEligible = aggColumn
+    ? allActiveMeasuresForLists_().filter(m => isBoolTrue(m.targeted) && isBoolTrue(m.aggregatorFlags?.[aggColumn]))
+    : [];
   const allActive = effectiveMeasures();
   const waterEligible = allActive.filter(m=> waterOverrideEligible_(m));
   if(overall === 'advanced' || overall === 'leading'){
     eligible = resilienceOk ? [renderResiliencePayment()] : [];
   } else {
     eligible = suggestedMeasures(baseCandidates, levelsForNonResilience);
+  }
+  if(targetedEligible.length){
+    const seen = new Set(eligible.map(m=>m.code));
+    for(const m of targetedEligible){
+      if(!seen.has(m.code)){
+        eligible.push(m);
+        seen.add(m.code);
+      }
+    }
   }
   if(waterEligible.length){
     const seen = new Set(eligible.map(m=>m.code));
@@ -1215,6 +1230,7 @@ function selectEligibleMeasures(criteriaValues){
   const eligibleCodes = new Set(eligible.map(m=>m.code));
   const candidateMap = new Map();
   for(const m of baseCandidates) candidateMap.set(m.code, m);
+  for(const m of targetedEligible) candidateMap.set(m.code, m);
   for(const m of waterEligible) candidateMap.set(m.code, m);
   const allCandidates = Array.from(candidateMap.values());
   const ineligible = allCandidates.filter(m=> !eligibleCodes.has(m.code));
