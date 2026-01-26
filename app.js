@@ -288,6 +288,99 @@ function setAggregatorOptions_(regionValue){
   }
 }
 
+function waterRequiredFromRegion_(regionValue){
+  return regionValue === 'east_of_england';
+}
+
+function isWaterRequired_(){
+  const region = app?.data?.applicant?.region || document.getElementById('s1-region')?.value || '';
+  return waterRequiredFromRegion_(region);
+}
+
+function sectionNumberFor_(sectionKey){
+  const waterRequired = isWaterRequired_();
+  const baseNew = {
+    'sec-1':1,'sec-2':2,'sec-3':3,'sec-4':4,'sec-5':5,'sec-6':6,'sec-7':7,'sec-8':8,'sec-9':9
+  };
+  const baseExisting = {
+    'sec-1':1,'sec-2':2,'sec-synth':3,'sec-x':4
+  };
+
+  let number = null;
+  if(sectionKey in baseNew) number = baseNew[sectionKey];
+  if(sectionKey in baseExisting) number = baseExisting[sectionKey];
+  if(number == null) return null;
+
+  if(!waterRequired){
+    if(sectionKey === 'sec-2') return null;
+    if(sectionKey in baseNew && number > 2) return number - 1;
+    if(sectionKey in baseExisting && number > 2) return number - 1;
+  }
+  return number;
+}
+
+function sectionLabel_(sectionKey){
+  const num = sectionNumberFor_(sectionKey);
+  return num == null ? 'Section' : `Section ${num}`;
+}
+
+function updateSectionNumbers_(){
+  const ids = ['sec-1','sec-2','sec-3','sec-4','sec-5','sec-6','sec-7','sec-8','sec-9','sec-synth','sec-x'];
+  for(const id of ids){
+    const titleEl = document.querySelector(`#${id} .section-title`);
+    if(!titleEl) continue;
+    const num = sectionNumberFor_(id);
+    if(num == null) continue;
+    titleEl.textContent = `Section ${num}`;
+  }
+}
+
+function clearWaterValues_(){
+  ['s2-anglian','s2-affinity'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
+  if(app.data) app.data.water = { anglian:null, affinity:null };
+}
+
+function nextStepKey_(){
+  if(app.flow === 'new') return isWaterRequired_() ? 's2w' : 's2';
+  if(app.flow === 'trade2025') return isWaterRequired_() ? 's2w' : 'syn';
+  return 's1';
+}
+
+function applyWaterRegionRules_(){
+  const required = isWaterRequired_();
+  const sec2 = document.getElementById('sec-2');
+
+  if(required && app.flow){
+    sec2?.classList.remove('hide');
+    app.done.delete('s2w');
+    app.warn.add('s2w');
+    if(app.flow === 'new') setLocked('sec-3', true);
+    if(app.flow === 'trade2025') setLocked('sec-synth', true);
+  } else {
+    sec2?.classList.add('hide');
+    clearWaterValues_();
+    if(app.flow && !required){
+      app.done.add('s2w');
+      app.warn.delete('s2w');
+      if(app.flow === 'new') setLocked('sec-3', false);
+      if(app.flow === 'trade2025') setLocked('sec-synth', false);
+    }
+  }
+
+  validateWaterSection(false);
+  if(app.flow === 'new') updateSubmitNewState();
+  if(app.flow === 'trade2025') validateExisting(false);
+  updateReview();
+  updateSectionNumbers_();
+
+  if(app.flow && !app.submitted){
+    setStepper(nextStepKey_());
+  }
+}
+
 function cfgFromSheetMeasures(sheetMeasures){
   const cfg = {};
   const meta = {};
@@ -671,9 +764,10 @@ function setAriaDisabled_(el, disabled){
 function markDone(stepKey){ app.done.add(stepKey); }
 
 function setStepper(active){
+  const showWater = !!app.flow && isWaterRequired_();
   const steps = [
     {key:'s1', label:'Identification'},
-    ...(app.flow ? [{key:'s2w', label:'Water eligibility'}] : []),
+    ...(showWater ? [{key:'s2w', label:'Water eligibility'}] : []),
     ...(app.flow === 'new' ? [
       {key:'s2', label:'Baseline'},
       {key:'s3', label:'Rotations'},
@@ -701,7 +795,7 @@ function setStepper(active){
 }
 
 function updateStepperStatusesNew_(showMissing){
-  const waterOk = validateWaterSection(showMissing).ok;
+  const waterOk = isWaterRequired_() ? validateWaterSection(showMissing).ok : true;
   const baselineReq = ['s2-agri','s2-arable','s2-perm-crop','s2-pasture','s2-habitat','s2-livestock','s2-fuel'];
   const baselineMissing = baselineReq.filter(id => {
     const el = document.getElementById(id);
@@ -756,7 +850,7 @@ function updateStepperStatusesNew_(showMissing){
 
 function updateStepperStatusesExisting_(showMissing){
   const s1ok = validateSection1(false).ok;
-  const waterOk = validateWaterSection(showMissing).ok;
+  const waterOk = isWaterRequired_() ? validateWaterSection(showMissing).ok : true;
   if(showMissing) validateExisting(true);
   if(showMissing) validateSyntheticSection(true, 'existing');
 
@@ -777,8 +871,9 @@ function updateStepperStatusesExisting_(showMissing){
 
 function markAllDoneForFlow_(){
   app.warn = new Set();
-  if(app.flow === 'new') ['s1','s2w','s2','s3','s4','s5','s6','s7','s8'].forEach(k=> app.done.add(k));
-  if(app.flow === 'trade2025') ['s1','s2w','syn','mrv'].forEach(k=> app.done.add(k));
+  const waterStep = isWaterRequired_() ? ['s2w'] : [];
+  if(app.flow === 'new') ['s1',...waterStep,'s2','s3','s4','s5','s6','s7','s8'].forEach(k=> app.done.add(k));
+  if(app.flow === 'trade2025') ['s1',...waterStep,'syn','mrv'].forEach(k=> app.done.add(k));
 }
 
 // ===============================
@@ -1175,6 +1270,7 @@ function overallFromLevels(levels){
 // Measures selection
 // ===============================
 function waterOverrideEligible_(measure){
+  if(!isWaterRequired_()) return false;
   const water = app.data.water || {};
   const inAnglian = water.anglian === true;
   const inAffinity = water.affinity === true;
@@ -1476,7 +1572,7 @@ function bindInfrastructure(){
     const meta = infraMeta();
     if(summary){
       if(meta.agriM2 == null){
-        summary.textContent = 'Enter Agricultural area in Section 3 to calculate % impacted.';
+        summary.textContent = `Enter Agricultural area in ${sectionLabel_('sec-3')} to calculate % impacted.`;
       } else {
         summary.textContent = `Total impacted: ${Math.round(meta.totalImpactM2*100)/100} m² • Agricultural area: ${Math.round(meta.agriM2)} m² • % impacted: ${meta.pct ?? '—'}%`;
       }
@@ -1484,7 +1580,7 @@ function bindInfrastructure(){
 
     if(status){
       if(meta.agriM2 == null){
-        status.textContent = 'Please complete Agricultural area in Section 3.';
+        status.textContent = `Please complete Agricultural area in ${sectionLabel_('sec-3')}.`;
         status.classList.add('warn');
         status.classList.remove('err');
       } else if(!hasComplete){
@@ -1825,7 +1921,7 @@ function validateCriteriaSection(showMissing){
 function validateExisting(showMissing){
   const required = [1,2,3,4,7];
   const missing = required.filter(i => app.data.mrvCriteria['C'+i] == null);
-  const waterOk = app.data.water && app.data.water.anglian != null && app.data.water.affinity != null;
+  const waterOk = !isWaterRequired_() || (app.data.water && app.data.water.anglian != null && app.data.water.affinity != null);
   const syntheticOk = syntheticMeta_().allComplete;
 
   const btn = document.getElementById('submit-existing');
@@ -1839,12 +1935,12 @@ function validateExisting(showMissing){
     if(ok){
       status.textContent = '';
       status.classList.remove('err','warn');
-    } else if(!waterOk){
-      status.textContent = 'Please complete Water catchment eligibility (Section 2).';
+    } else if(!waterOk && isWaterRequired_()){
+      status.textContent = `Please complete Water catchment eligibility (${sectionLabel_('sec-2')}).`;
       status.classList.remove('err');
       status.classList.add('warn');
     } else if(!syntheticOk){
-      status.textContent = 'Please complete Synthetic inputs (Section 3).';
+      status.textContent = `Please complete Synthetic inputs (${sectionLabel_('sec-synth')}).`;
       status.classList.remove('err');
       status.classList.add('warn');
     } else {
@@ -1907,6 +2003,21 @@ function validateSection1(showMissing){
 }
 
 function validateWaterSection(showMissing){
+  if(!isWaterRequired_()){
+    clearWaterValues_();
+    const btn = document.getElementById('s2w-next');
+    if(btn){
+      btn.classList.remove('disabled');
+      setAriaDisabled_(btn, false);
+    }
+    const status = document.getElementById('s2w-status');
+    if(status){
+      status.textContent = '';
+      status.classList.remove('err','warn');
+    }
+    return { ok:true, anglian:null, affinity:null };
+  }
+
   const anglianEl = document.getElementById('s2-anglian');
   const affinityEl = document.getElementById('s2-affinity');
   const anglian = yesNoToBool(anglianEl?.value);
@@ -1981,6 +2092,7 @@ function bindSection1(){
     }
     updateReview();
     markSection1Dirty_();
+    applyWaterRegionRules_();
   });
 
   aggregatorEl?.addEventListener('change', ()=>{
@@ -2008,21 +2120,20 @@ function bindSection1(){
     resetSubmitState_();
 
     markDone('s1');
+    applyWaterRegionRules_();
 
     if(app.flow === 'new'){
-      document.getElementById('sec-2')?.classList.remove('hide');
       document.getElementById('new-flow').classList.remove('hide');
       document.getElementById('existing-flow').classList.add('hide');
       initLocksForFlow_();
-      setStepper('s2w');
-      scrollToId('sec-2');
+      setStepper(nextStepKey_());
+      scrollToId(isWaterRequired_() ? 'sec-2' : 'sec-3');
     } else {
-      document.getElementById('sec-2')?.classList.remove('hide');
       document.getElementById('existing-flow').classList.remove('hide');
       document.getElementById('new-flow').classList.add('hide');
       initLocksForFlow_();
-      setStepper('s2w');
-      scrollToId('sec-2');
+      setStepper(nextStepKey_());
+      scrollToId(isWaterRequired_() ? 'sec-2' : 'sec-synth');
     }
 
     saveViewState_({ flow: app.flow });
@@ -2156,13 +2267,15 @@ function setLocked(id, locked){
 }
 
 function initLocksForFlow_(){
+  const waterRequired = isWaterRequired_();
   if(app.flow === 'new'){
     setLocked('sec-2', false);
-    ['sec-3','sec-4','sec-5','sec-6','sec-7','sec-8','sec-9','sec-out-new'].forEach(id=> setLocked(id, true));
+    setLocked('sec-3', waterRequired);
+    ['sec-4','sec-5','sec-6','sec-7','sec-8','sec-9','sec-out-new'].forEach(id=> setLocked(id, true));
   }
   if(app.flow === 'trade2025'){
     setLocked('sec-2', false);
-    setLocked('sec-synth', true);
+    setLocked('sec-synth', waterRequired);
     setLocked('sec-x', true);
     setLocked('sec-out-existing', true);
   }
@@ -2172,7 +2285,7 @@ function applyLocksFromProgress_(){
   initLocksForFlow_();
 
   if(app.flow === 'new'){
-    if(app.done.has('s2w')) setLocked('sec-3', false);
+    if(!isWaterRequired_() || app.done.has('s2w')) setLocked('sec-3', false);
     if(app.done.has('s2')) setLocked('sec-4', false);
     if(app.done.has('s3')) setLocked('sec-5', false);
     if(app.done.has('s4')) setLocked('sec-6', false);
@@ -2183,7 +2296,7 @@ function applyLocksFromProgress_(){
   }
 
   if(app.flow === 'trade2025'){
-    if(app.done.has('s2w')) setLocked('sec-synth', false);
+    if(!isWaterRequired_() || app.done.has('s2w')) setLocked('sec-synth', false);
     if(app.done.has('syn')) setLocked('sec-x', false);
     if(app.submitted) setLocked('sec-out-existing', false);
   }
@@ -2264,6 +2377,9 @@ function updateReview(){
   const criteria = computeCriteriaForNew();
   const { levels, overall } = selectEligibleMeasures(criteria);
   const waterLabel = (v)=> (v == null ? '—' : (v ? 'Yes' : 'No'));
+  const waterLine = isWaterRequired_()
+    ? `<div class="small">Anglian Water catchment: <strong>${waterLabel(w.anglian)}</strong> • Affinity Water catchment: <strong>${waterLabel(w.affinity)}</strong></div>`
+    : '';
 
   el.innerHTML = `
     <div class="grid">
@@ -2272,7 +2388,7 @@ function updateReview(){
           <div><strong>${escapeHtml(app.data.applicant.name)}</strong></div>
           <div class="small">${escapeHtml(app.data.applicant.business)} • ${escapeHtml(app.data.applicant.email)}</div>
           <div class="small">${escapeHtml(regionLabel_(app.data.applicant.region))} • ${escapeHtml(aggregatorLabel_(app.data.applicant.supply_aggregator))}</div>
-          <div class="small">Anglian Water catchment: <strong>${waterLabel(w.anglian)}</strong> • Affinity Water catchment: <strong>${waterLabel(w.affinity)}</strong></div>
+          ${waterLine}
         </div>
       <div class="card" style="box-shadow:none">
         <div class="section-title">Baseline</div>
@@ -2312,7 +2428,7 @@ function updateSubmitNewState(){
   const rotOk = app.validation.rotations?.hasComplete && !app.validation.rotations?.hasPartial;
   const infraOk = app.validation.infrastructure?.hasComplete && !app.validation.infrastructure?.hasPartial && infraMeta().agriM2 != null;
   const cropsOk = app.validation.crops?.hasComplete && !app.validation.crops?.hasPartial;
-  const waterOk = app.data.water && app.data.water.anglian != null && app.data.water.affinity != null;
+  const waterOk = !isWaterRequired_() || (app.data.water && app.data.water.anglian != null && app.data.water.affinity != null);
   const syntheticOk = syntheticMeta_().allComplete;
   const ok = missing.length === 0 && rotOk && infraOk && cropsOk && waterOk && syntheticOk;
   btn.classList.toggle('disabled', !ok);
@@ -2336,6 +2452,10 @@ function buildSubmissionPayload(flow, criteriaValues, selection){
   }
 
   const overall = selection.overall;
+
+  const waterPayload = isWaterRequired_()
+    ? app.data.water
+    : { anglian:null, affinity:null };
 
   return {
     timestamp: new Date().toISOString(),
@@ -2361,7 +2481,7 @@ function buildSubmissionPayload(flow, criteriaValues, selection){
       app: 'Application Form 2026 POC',
       farm_type: flow,
       details: {
-        water_catchment: app.data.water,
+        water_catchment: waterPayload,
         baseline: app.data.baseline,
         rotations: app.data.rotations,
         infrastructure: app.data.infrastructure,
@@ -2403,6 +2523,14 @@ function printNewFarm_(selection, criteriaValues, levels){
 
   const yesNo = (v)=> (v==null ? '—' : (Number(v)>=1 ? 'Yes' : 'No'));
   const fmt = (v, suf='')=> (v==null ? '—' : `${v}${suf}`);
+  const waterBlock = isWaterRequired_()
+    ? `
+      <h3 style="margin:0 0 8px">Water catchment eligibility (${sectionLabel_('sec-2')})</h3>
+      <div class="small">Anglian Water catchment: <strong>${yesNo(w.anglian)}</strong></div>
+      <div class="small">Affinity Water catchment: <strong>${yesNo(w.affinity)}</strong></div>
+      <div class="divider"></div>
+    `
+    : '';
 
   const rotationsRows = (app.data.rotations || []).map(r=>`<tr><td>${escapeHtml(r.name||'')}</td><td>${escapeHtml(r.num_crops ?? '')}</td><td>${escapeHtml(r.area_ha ?? '')}</td></tr>`).join('');
   const infraRows = (app.data.infrastructure || []).map(r=>`<tr><td>${escapeHtml(r.type||'')}</td><td>${escapeHtml(r.qty ?? '')}</td><td>${escapeHtml(r.unit ?? '')}</td><td>${escapeHtml(r.impact ?? '')}</td><td>${escapeHtml(r.impact_m2 ?? '')}</td></tr>`).join('');
@@ -2467,13 +2595,9 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Water catchment eligibility (Section 2)</h3>
-      <div class="small">Anglian Water catchment: <strong>${yesNo(w.anglian)}</strong></div>
-      <div class="small">Affinity Water catchment: <strong>${yesNo(w.affinity)}</strong></div>
+      ${waterBlock}
 
-      <div class="divider"></div>
-
-      <h3 style="margin:0 0 8px">Baseline (Section 3)</h3>
+      <h3 style="margin:0 0 8px">Baseline (${sectionLabel_('sec-3')})</h3>
       <div class="small">Agricultural area: <strong>${fmt(b.agricultural_ha)}</strong> ha</div>
       <div class="small">Arable cropland: <strong>${fmt(b.arable_ha)}</strong> ha</div>
       <div class="small">Permanent cropland: <strong>${fmt(b.perm_cropland_ha)}</strong> ha</div>
@@ -2484,7 +2608,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Rotations (Section 4)</h3>
+      <h3 style="margin:0 0 8px">Rotations (${sectionLabel_('sec-4')})</h3>
       <table class="table">
         <thead><tr><th>Rotation</th><th># crops</th><th>Area (ha)</th></tr></thead>
         <tbody>${rotationsRows || `<tr><td colspan="3" class="small">None</td></tr>`}</tbody>
@@ -2492,7 +2616,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Nature infrastructure (Section 5)</h3>
+      <h3 style="margin:0 0 8px">Nature infrastructure (${sectionLabel_('sec-5')})</h3>
       <div class="small">Total impacted: <strong>${fmt(Math.round(infra.totalImpactM2*100)/100)}</strong> m² • % of agricultural area: <strong>${fmt(infra.pct, '%')}</strong></div>
       <table class="table">
         <thead><tr><th>Type</th><th>Qty</th><th>Unit</th><th>Impact factor</th><th>Impact area (m²)</th></tr></thead>
@@ -2501,7 +2625,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Criteria (Section 6)</h3>
+      <h3 style="margin:0 0 8px">Criteria (${sectionLabel_('sec-7')})</h3>
       <table class="table">
         <thead><tr><th>Criterion</th><th>What it measures</th><th>Your value</th><th>Level</th></tr></thead>
         <tbody>${critRows}</tbody>
@@ -2509,7 +2633,7 @@ function printNewFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Crops (Section 7)</h3>
+      <h3 style="margin:0 0 8px">Crops (${sectionLabel_('sec-8')})</h3>
       <table class="table">
         <thead><tr><th>Crop</th><th>Area (ha)</th><th>N (kg/ha)</th><th>Organic N (kg/ha)</th><th>Yield (t/ha)</th></tr></thead>
         <tbody>${cropsRows || `<tr><td colspan="5" class="small">None</td></tr>`}</tbody>
@@ -2543,6 +2667,14 @@ function printExistingFarm_(selection, criteriaValues, levels){
   const w = app.data.water || {};
   const yesNo = (v)=> (v==null ? '—' : (Number(v)>=1 ? 'Yes' : 'No'));
   const fmt = (v, suf='')=> (v==null ? '—' : `${v}${suf}`);
+  const waterBlock = isWaterRequired_()
+    ? `
+      <h3 style="margin:0 0 8px">Water catchment eligibility (${sectionLabel_('sec-2')})</h3>
+      <div class="small">Anglian Water catchment: <strong>${yesNo(w.anglian)}</strong></div>
+      <div class="small">Affinity Water catchment: <strong>${yesNo(w.affinity)}</strong></div>
+      <div class="divider"></div>
+    `
+    : '';
 
   const critRows = CRITERIA.map(c=>{
     const v = criteriaValues[c.id];
@@ -2603,13 +2735,9 @@ function printExistingFarm_(selection, criteriaValues, levels){
 
       <div class="divider"></div>
 
-      <h3 style="margin:0 0 8px">Water catchment eligibility (Section 2)</h3>
-      <div class="small">Anglian Water catchment: <strong>${yesNo(w.anglian)}</strong></div>
-      <div class="small">Affinity Water catchment: <strong>${yesNo(w.affinity)}</strong></div>
+      ${waterBlock}
 
-      <div class="divider"></div>
-
-      <h3 style="margin:0 0 8px">Criteria (MRV)</h3>
+      <h3 style="margin:0 0 8px">Criteria (MRV) (${sectionLabel_('sec-x')})</h3>
       <table class="table">
         <thead><tr><th>Criterion</th><th>What it measures</th><th>Your value</th><th>Level</th></tr></thead>
         <tbody>${critRows}</tbody>
@@ -2939,6 +3067,8 @@ function readViewState_(){
 }
 
 function readDomAutosaveState_(){
+  const regionValue = document.getElementById('s1-region')?.value || '';
+  const waterRequired = waterRequiredFromRegion_(regionValue);
   const state = {
     flow: app.flow,
     submitted: !!app.submitted,
@@ -2949,12 +3079,12 @@ function readDomAutosaveState_(){
         business: document.getElementById('s1-business')?.value?.trim() || '',
         email: document.getElementById('s1-email')?.value?.trim() || '',
         type: document.getElementById('s1-type')?.value || '',
-        region: document.getElementById('s1-region')?.value || '',
+        region: regionValue,
         supply_aggregator: document.getElementById('s1-aggregator')?.value || ''
       },
     water: {
-      anglian: yesNoToBool(document.getElementById('s2-anglian')?.value),
-      affinity: yesNoToBool(document.getElementById('s2-affinity')?.value)
+      anglian: waterRequired ? yesNoToBool(document.getElementById('s2-anglian')?.value) : null,
+      affinity: waterRequired ? yesNoToBool(document.getElementById('s2-affinity')?.value) : null
     },
     baseline: {
       agricultural_ha: numVal('s2-agri'),
@@ -3060,11 +3190,14 @@ function restoreAutosaveToDom_(state){
     else if(a.type === 'trade2025') app.flow = 'trade2025';
   }
 
-  if(state.water){
+  const waterRequired = waterRequiredFromRegion_(state.applicant?.region || '');
+  if(state.water && waterRequired){
     const w = state.water;
     if(document.getElementById('s2-anglian')) document.getElementById('s2-anglian').value = boolToYesNo(w.anglian);
     if(document.getElementById('s2-affinity')) document.getElementById('s2-affinity').value = boolToYesNo(w.affinity);
     app.data.water = { anglian: yesNoToBool(w.anglian), affinity: yesNoToBool(w.affinity) };
+  } else {
+    clearWaterValues_();
   }
 
   if(state.synthetic_inputs){
@@ -3275,14 +3408,13 @@ async function main(){
 
   // If a saved flow exists, show it immediately (no extra click)
   if(app.flow === 'new'){
-    document.getElementById('sec-2')?.classList.remove('hide');
     document.getElementById('new-flow')?.classList.remove('hide');
     document.getElementById('existing-flow')?.classList.add('hide');
   } else if(app.flow === 'trade2025'){
-    document.getElementById('sec-2')?.classList.remove('hide');
     document.getElementById('existing-flow')?.classList.remove('hide');
     document.getElementById('new-flow')?.classList.add('hide');
   }
+  applyWaterRegionRules_();
   if(app.flow) applyLocksFromProgress_();
 
   bindBaseline();
@@ -3310,7 +3442,7 @@ async function main(){
 
   // If we restored a flow, compute current step & re-render outputs if previously submitted
   if(app.flow){
-    const activeKey = app.submitted ? (app.flow === 'new' ? 's8' : 'mrv') : (app.flow === 'new' ? 's2w' : 's2w');
+    const activeKey = app.submitted ? (app.flow === 'new' ? 's8' : 'mrv') : nextStepKey_();
     setStepper(activeKey);
 
     if(app.submitted){
